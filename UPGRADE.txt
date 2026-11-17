@@ -1,0 +1,33 @@
+Theee
+CREATE UI SIMILART TO https://github.com/josephadogeriopao/vital-records-generator.GIT BUT USE COLOR Theme OF
+ICON in resources/icon.png  CREATE 3 THEMES LIGHT DARK AND BLACK THEME based on icon
+
+Functionality
+USE REPO https://github.com/jadogeri/Electron-Vite-App-Template/blob/main/documentation/FEATURE_ROADMAP.md
+TO MODIFY APP ADD
+MAIN AND ONLY THESE FEATURES
+• feat/frameless-window (Features 15–16): Replaces the default OS window frame with a custom HTML/CSS title bar and adds a bounded splash screen on startup. You need to verify native window controls (minimize, maximize, close) and screen-reader accessibility across Windows, macOS, and Linux.
+• feat/system-tray (Features 17–18): Adds a system tray icon that saves user preferences (such as minimizing to tray instead of quitting) and provides a fallback mechanism when native OS desktop notifications are blocked. You need to test how the tray icon and notification permissions behave on each desktop OS.
+• feat/command-palette (Features 19–21): Implements bounded keyboard shortcuts, a searchable quick-action command palette (like Ctrl+K / Cmd+K), and native application menus. You must check that shortcuts do not collide with system-level OS hotkeys and that screen readers can navigate the palette.
+ONLY
+
+Features
+Add features
+Recent Files and activity
+Team - same as vital records
+input layout profiles (replace with preferences if user has a default file name to be reused as option) like save tc33 file
+or create using date format of different kinds
+save history similar to vital-records-generator.GIT 
+batch validate . batch load multiple source excel data 
+can clear saved history . 
+export mismatch data as pdf or word docx
+
+add functionality
+
+
+Tests
+ui tests using playwright
+tests
+
+Layouts 
+use same layouts as vital records repository
