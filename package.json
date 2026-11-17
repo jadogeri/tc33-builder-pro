@@ -9,6 +9,10 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:ui": "playwright test",
+    "dev:web": "vite --config vite.web.config.ts",
     "build:win": "npm run build && electron-builder --win"
   },
   "dependencies": {
@@ -18,13 +22,12 @@
     "electron-store": "^8.2.0",
     "electron-updater": "^6.8.11",
     "exceljs": "^4.4.0",
-    "file-saver": "^2.0.5",
+    "docx": "^9.5.1",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.9",
     "react-csv": "^2.2.2",
     "react-drag-drop-files": "^3.1.0",
     "react-router-dom": "^7.18.5",
-    "xlsx": "^0.18.5",
     "zod": "^3.24.0"
   },
   "devDependencies": {
@@ -35,7 +38,9 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^35.7.5",
-    "electron-builder": "^25.1.8",
+    "electron-builder": "^26.0.12",
+    "@playwright/test": "^1.56.1",
+    "tsx": "^4.20.6",
     "electron-vite": "^3.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -50,6 +55,7 @@
     },
     "files": [
       "out/**/*",
+      "resources/**/*",
       "package.json"
     ],
     "win": {
