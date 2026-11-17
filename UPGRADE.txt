@@ -1,9 +1,11 @@
-Theee
-CREATE UI SIMILART TO https://github.com/josephadogeriopao/vital-records-generator.GIT BUT USE COLOR Theme OF
+update repo : https://github.com/jadogeri/tc33-builder-pro
+
+Theme
+CREATE UI SIMILAR TO other repo https://github.com/josephadogeriopao/vital-records-generator.GIT BUT USE COLOR Theme OF
 ICON in resources/icon.png  CREATE 3 THEMES LIGHT DARK AND BLACK THEME based on icon
 
 Functionality
-USE REPO https://github.com/jadogeri/Electron-Vite-App-Template/blob/main/documentation/FEATURE_ROADMAP.md
+USE other REPO https://github.com/jadogeri/Electron-Vite-App-Template/blob/main/documentation/FEATURE_ROADMAP.md
 TO MODIFY APP ADD
 MAIN AND ONLY THESE FEATURES
 • feat/frameless-window (Features 15–16): Replaces the default OS window frame with a custom HTML/CSS title bar and adds a bounded splash screen on startup. You need to verify native window controls (minimize, maximize, close) and screen-reader accessibility across Windows, macOS, and Linux.
