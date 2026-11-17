@@ -10,5 +10,17 @@ export const channels = {
   getSettings: 'settings:get',
   setTheme: 'settings:set-theme',
   themeChanged: 'theme:changed',
-  toast: 'app:toast'
+  toast: 'app:toast',
+  windowControl: 'window:control',
+  getWorkspace: 'workspace:get',
+  setPreferences: 'workspace:preferences',
+  openSources: 'workspace:open',
+  reopenSource: 'workspace:reopen',
+  recordActivity: 'workspace:activity',
+  clearHistory: 'workspace:clear',
+  saveExport: 'workspace:export',
+  exportMismatches: 'workspace:export-mismatches',
+  validateSources: 'workspace:validate-sources',
+  generateSources: 'workspace:generate-sources',
+  rendererReady: 'window:ready'
 } as const

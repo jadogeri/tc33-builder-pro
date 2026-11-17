@@ -3,6 +3,7 @@ import {
   AssessmentValues,
   PsrJsonPayload
 } from '../renderer/src/types/tc33'
+import type { InputFile } from '../shared/types'
 import { extractJsonSchema, extractXlsxFile } from './extract'
 import { buildTc33Workbook } from './load'
 import {
@@ -10,7 +11,6 @@ import {
   transform,
   TransformResult
 } from './transform'
-import log from 'electron-log/renderer'
 
 export interface ValidationPipelineResult extends TransformResult {
   summaryLog: string
@@ -24,12 +24,6 @@ export function compareReports(
   jsonReport: AssessmentReport
 ): string[] {
   const discrepancies: string[] = []
-  log.info('Comparing Excel report against JSON report.')
-  log.info('Excel report tax year:', excelReport.taxYear)
-  log.info('Excel report district:', excelReport.district)
-  log.info('JSON report tax year:', jsonReport.taxYear)
-  log.info('JSON report district:', jsonReport.district)
-
   // Compare Parish Metadata
   if (jsonReport.district && excelReport.district !== jsonReport.district) {
     discrepancies.push(
@@ -81,8 +75,8 @@ export function compareReports(
 }
 
 export async function runValidationPipeline(
-  xlsxFile: File,
-  jsonFile: File
+  xlsxFile: InputFile,
+  jsonFile: InputFile
 ): Promise<ValidationPipelineResult> {
   // 1. Extract raw rows (and SQL tab) from Excel and PSR payload from JSON
   const sheet = await extractXlsxFile(xlsxFile)
@@ -136,9 +130,7 @@ export async function runValidationPipeline(
 
 export async function runBuildPipeline(
   report: AssessmentReport,
-  sourceFileName: string
-): Promise<string> {
-  const outputFileName = 'tc33.xlsx'
-  await buildTc33Workbook(report, outputFileName)
-  return `Success! Exported "${outputFileName}" from "${sourceFileName}" (${report.groups.size} groups) for District ${report.district}, Tax Year ${report.taxYear}.`
+  outputFileName = 'tc33.xlsx'
+): Promise<Uint8Array> {
+  return await buildTc33Workbook(report, outputFileName)
 }
