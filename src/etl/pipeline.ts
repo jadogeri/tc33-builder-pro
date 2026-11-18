@@ -1,3 +1,4 @@
+import { log } from '../main/logger'
 import {
   AssessmentReport,
   AssessmentValues,
@@ -11,6 +12,10 @@ import {
   transform,
   TransformResult
 } from './transform'
+
+const omitGroups: Set<string> = new Set()
+omitGroups.add('7') // EXEMPT - PERSONAL PROPERTY
+omitGroups.add('8') // EXEMPT - REAL ESTATE CATEGORY
 
 export interface ValidationPipelineResult extends TransformResult {
   summaryLog: string
@@ -43,16 +48,24 @@ export function compareReports(
 
   // Compare Class Items Group by Group
   jsonReport.groups.forEach((jsonGroup, groupCode) => {
+    const cleanCode = String(groupCode).trim()
+    log.info("Json group :", JSON.stringify(jsonGroup, null, 2))
+    if (omitGroups.has(cleanCode)) {
+      log.info(`Omitting group ${cleanCode} from comparison.`)
+      return
+    }
     const excelGroup = excelReport.groups.get(groupCode)
+    log.info("Excel group :", JSON.stringify(excelGroup, null, 2))
+
     if (!excelGroup) {
-      discrepancies.push(`Missing Group ${groupCode} in Excel report.`)
+      discrepancies.push(`Missing Group line 60 ${cleanCode} in Excel report.`)
       return
     }
 
     for (const jsonItem of jsonGroup.items) {
       const excelItem = excelGroup.items.find((i) => i.classCode === jsonItem.classCode)
       if (!excelItem) {
-        discrepancies.push(`Group ${groupCode}: Class ${jsonItem.classCode} missing in Excel.`)
+        discrepancies.push(`Group ${cleanCode}: Class ${jsonItem.classCode} missing in Excel.`)
         continue
       }
 
@@ -77,15 +90,20 @@ export function compareReports(
   })
 
   for (const [groupCode, excelGroup] of excelReport.groups) {
+    const cleanCode = String(groupCode).trim()
+    if (omitGroups.has(cleanCode)) {
+      log.info(`Omitting group ${cleanCode} from comparison.`)
+      continue
+    }
     const jsonGroup = jsonReport.groups.get(groupCode)
     if (!jsonGroup) {
-      discrepancies.push(`Missing Group ${groupCode} in JSON report.`)
+      discrepancies.push(`Missing Group line 94 ${cleanCode} in JSON report.`)
       continue
     }
     const jsonClassCodes = new Set(jsonGroup.items.map((item) => item.classCode))
     for (const excelItem of excelGroup.items) {
       if (!jsonClassCodes.has(excelItem.classCode)) {
-        discrepancies.push(`Group ${groupCode}: Class ${excelItem.classCode} missing in JSON.`)
+        discrepancies.push(`Group ${cleanCode}: Class ${excelItem.classCode} missing in JSON.`)
       }
     }
   }
@@ -125,6 +143,8 @@ export async function runValidationPipeline(
 
   // 3. Compare Excel values against JSON values
   const jsonDiscrepancies = compareReports(result.report, jsonReport)
+  log.info(`Found ${jsonDiscrepancies.length} discrepancies between Excel and JSON reports.`)
+  log.info("jsonReport: ", jsonReport)
   const allErrors = [...result.errors, ...jsonDiscrepancies]
   const isValid = allErrors.length === 0 && result.report.groups.size > 0
 

@@ -30,10 +30,10 @@ const Store = require("electron-store");
 const node_crypto = require("node:crypto");
 const promises = require("node:fs/promises");
 const node_buffer = require("node:buffer");
+const log = require("electron-log/main");
 const ExcelJS = require("exceljs");
-const log = require("electron-log");
+const log$1 = require("electron-log");
 const updater = require("electron-updater");
-const log$1 = require("electron-log/main");
 const fs = require("fs");
 const themeSchema = zod.z.enum(["light", "dark", "black", "system"]);
 const preferencesSchema = zod.z.object({
@@ -355,6 +355,21 @@ function handle(name, handler) {
   electron.ipcMain.handle(channels[name], (event, ...args) => {
     assertTrustedSender(event);
     return handler(event, ...args);
+  });
+}
+function registerLogger() {
+  log.initialize();
+  log.transports.file.resolvePathFn = () => node_path.join(electron.app.getPath("logs"), "main.log");
+  log.transports.file.maxSize = 5 * 1024 * 1024;
+  const fatalError = (event) => {
+    log.error({ event });
+    electron.dialog.showErrorBox("Application error", "The application encountered an unexpected error and must close. Reopen it to try again.");
+    electron.app.exit(1);
+  };
+  process.on("unhandledRejection", () => fatalError("unhandled-rejection"));
+  process.on("uncaughtException", () => fatalError("main-process-crash"));
+  electron.app.on("render-process-gone", (_event, _contents, details) => {
+    log.error({ event: "renderer-process-gone", reason: details.reason });
   });
 }
 async function readFileBuffer(file) {
@@ -850,6 +865,9 @@ function mapPsrJsonToAssessmentReport(payload) {
     taxYear: metadata.taxYear
   };
 }
+const omitGroups = /* @__PURE__ */ new Set();
+omitGroups.add("7");
+omitGroups.add("8");
 const toNum = (val) => {
   if (typeof val === "number") return Number.isFinite(val) ? val : 0;
   if (typeof val !== "string") return 0;
@@ -869,15 +887,22 @@ function compareReports(excelReport, jsonReport) {
     );
   }
   jsonReport.groups.forEach((jsonGroup, groupCode) => {
+    const cleanCode = String(groupCode).trim();
+    log.info("Json group :", JSON.stringify(jsonGroup, null, 2));
+    if (omitGroups.has(cleanCode)) {
+      log.info(`Omitting group ${cleanCode} from comparison.`);
+      return;
+    }
     const excelGroup = excelReport.groups.get(groupCode);
+    log.info("Excel group :", JSON.stringify(excelGroup, null, 2));
     if (!excelGroup) {
-      discrepancies.push(`Missing Group ${groupCode} in Excel report.`);
+      discrepancies.push(`Missing Group line 60 ${cleanCode} in Excel report.`);
       return;
     }
     for (const jsonItem of jsonGroup.items) {
       const excelItem = excelGroup.items.find((i) => i.classCode === jsonItem.classCode);
       if (!excelItem) {
-        discrepancies.push(`Group ${groupCode}: Class ${jsonItem.classCode} missing in Excel.`);
+        discrepancies.push(`Group ${cleanCode}: Class ${jsonItem.classCode} missing in Excel.`);
         continue;
       }
       const fields = [
@@ -899,15 +924,20 @@ function compareReports(excelReport, jsonReport) {
     }
   });
   for (const [groupCode, excelGroup] of excelReport.groups) {
+    const cleanCode = String(groupCode).trim();
+    if (omitGroups.has(cleanCode)) {
+      log.info(`Omitting group ${cleanCode} from comparison.`);
+      continue;
+    }
     const jsonGroup = jsonReport.groups.get(groupCode);
     if (!jsonGroup) {
-      discrepancies.push(`Missing Group ${groupCode} in JSON report.`);
+      discrepancies.push(`Missing Group line 94 ${cleanCode} in JSON report.`);
       continue;
     }
     const jsonClassCodes = new Set(jsonGroup.items.map((item) => item.classCode));
     for (const excelItem of excelGroup.items) {
       if (!jsonClassCodes.has(excelItem.classCode)) {
-        discrepancies.push(`Group ${groupCode}: Class ${excelItem.classCode} missing in JSON.`);
+        discrepancies.push(`Group ${cleanCode}: Class ${excelItem.classCode} missing in JSON.`);
       }
     }
   }
@@ -938,6 +968,8 @@ ${errors.map((item) => `- ${item}`).join("\n")}`
   }
   const jsonReport = mapPsrJsonToAssessmentReport(rawJson);
   const jsonDiscrepancies = compareReports(result.report, jsonReport);
+  log.info(`Found ${jsonDiscrepancies.length} discrepancies between Excel and JSON reports.`);
+  log.info("jsonReport: ", jsonReport);
   const allErrors = [...result.errors, ...jsonDiscrepancies];
   const isValid = allErrors.length === 0 && result.report.groups.size > 0;
   const logLines = [];
@@ -1327,7 +1359,7 @@ function sendState(next) {
     if (!window.isDestroyed()) window.webContents.send(channels.updateStatus, state);
   }
 }
-const reportUpdateError = createUpdateErrorReporter(sendState, log);
+const reportUpdateError = createUpdateErrorReporter(sendState, log$1);
 async function checkForUpdates() {
   if (!electron.app.isPackaged) {
     sendState({ status: "not-available" });
@@ -1340,7 +1372,7 @@ function registerUpdater(_mainWindow) {
   registered = true;
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
-  autoUpdater.logger = log;
+  autoUpdater.logger = log$1;
   autoUpdater.on("checking-for-update", () => sendState({ status: "checking" }));
   autoUpdater.on("update-available", (info) => sendState({ status: "available", version: info.version }));
   autoUpdater.on("update-not-available", () => sendState({ status: "not-available" }));
@@ -1476,21 +1508,6 @@ function registerAppMenu(mainWindow) {
     }
   ];
   electron.Menu.setApplicationMenu(electron.Menu.buildFromTemplate(template));
-}
-function registerLogger() {
-  log$1.initialize();
-  log$1.transports.file.resolvePathFn = () => node_path.join(electron.app.getPath("logs"), "main.log");
-  log$1.transports.file.maxSize = 5 * 1024 * 1024;
-  const fatalError = (event) => {
-    log$1.error({ event });
-    electron.dialog.showErrorBox("Application error", "The application encountered an unexpected error and must close. Reopen it to try again.");
-    electron.app.exit(1);
-  };
-  process.on("unhandledRejection", () => fatalError("unhandled-rejection"));
-  process.on("uncaughtException", () => fatalError("main-process-crash"));
-  electron.app.on("render-process-gone", (_event, _contents, details) => {
-    log$1.error({ event: "renderer-process-gone", reason: details.reason });
-  });
 }
 process.on("uncaughtException", (err) => {
   fs.writeFileSync("crash.txt", `UNCAUGHT EXCEPTION:

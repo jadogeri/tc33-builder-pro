@@ -46,7 +46,7 @@ export function compareReports(
   jsonReport.groups.forEach((jsonGroup, groupCode) => {
     const excelGroup = excelReport.groups.get(groupCode)
     if (!excelGroup) {
-      discrepancies.push(`Missing Group ${groupCode} in Excel report.`)
+      discrepancies.push(`Missing Group line 49 ${groupCode} in Excel report.`)
       return
     }
 
