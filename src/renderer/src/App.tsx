@@ -70,6 +70,11 @@ function App(): React.JSX.Element {
       catch (error) { setMessage(`Could not save preferences: ${String(error)}`); return }
     } else setState((prev) => ({ ...prev, preferences }))
   }
+  const cycleTheme = () => {
+    const themes: Preferences['theme'][] = ['light', 'dark', 'black']
+    const current = themes.indexOf(state.preferences.theme)
+    void updatePreferences({ theme: themes[(current + 1 + themes.length) % themes.length] })
+  }
 
   function mergeImported(picked: SourceFile[]) {
     setValidationResults([])
@@ -144,6 +149,15 @@ function App(): React.JSX.Element {
       setSection('workspace')
       setMessage(`Reopened ${file.name}.`)
     } catch (error) { setMessage(`Could not reopen file: ${String(error)}`) }
+  }
+
+  async function removeRecent(file: RecentFile) {
+    if (!window.confirm(`Remove ${file.name} from recent files? The source file and any imported batch will remain unchanged.`)) return
+    try {
+      if (api) setWorkspace(await api.removeRecentFile(file.path))
+      else setState((prev) => ({ ...prev, recent: prev.recent.filter((item) => item.path !== file.path) }))
+      setMessage(`${file.name} removed from recent files. The source file was not deleted.`)
+    } catch (error) { setMessage(`Could not remove recent file: ${String(error)}`) }
   }
 
   const excelSources = useMemo(() => sources.filter((source) => /\.xlsx$/i.test(source.name)), [sources])
@@ -231,6 +245,18 @@ function App(): React.JSX.Element {
     <header className="titlebar">
       <div className="brand"><img src={new URL('../../../resources/icon.png', import.meta.url).href} alt="" /><span>TC33 Builder <b>Pro</b></span></div>
       <span className="titlebar-caption">Orleans Parish Assessor’s Office</span>
+      <button
+        className="theme-toggle"
+        type="button"
+        title={`Theme: ${state.preferences.theme === 'black' ? 'contrast' : state.preferences.theme}. Switch theme`}
+        aria-label={`Theme: ${state.preferences.theme === 'black' ? 'contrast' : state.preferences.theme}. Switch theme`}
+        onClick={cycleTheme}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" />
+        </svg>
+      </button>
       <div className="window-actions" aria-label="Window controls">
         <button aria-label="Minimize window" onClick={() => void api?.windowControl('minimize')}>−</button>
         <button aria-label="Maximize or restore window" onClick={() => void api?.windowControl('maximize')}>□</button>
@@ -242,7 +268,7 @@ function App(): React.JSX.Element {
         <div className="sidebar-label">WORKSPACE</div>
         {([['workspace','◫','Overview'],['history','◷','Recent & activity'],['settings','⚙','Preferences'],['team','♙','Team']] as const).map(([id,icon,label]) =>
           <button key={id} className={`nav-item ${section === id ? 'selected' : ''}`} onClick={() => setSection(id)} aria-current={section === id ? 'page' : undefined}><span>{icon}</span>{label}</button>)}
-        <div className="sidebar-foot"><span className="status-dot" /> Files stay on this device</div>
+        <div className="sidebar-foot"><span className="status-dot" /><span className="sidebar-foot-label">Files stay on this device</span><span className="sidebar-version">v1</span></div>
       </aside>
       <motion.main
         className="main-content flex-1"
@@ -269,7 +295,7 @@ function App(): React.JSX.Element {
           {validationResults.length > 0 && <section className="card source-card"><div className="card-heading"><div><h2>Export invalid report</h2><p>Save validation issues as PDF, Excel, CSV, JSON, text, or Word.</p></div></div><div className="export-formats">{([['pdf','PDF'],['xlsx','Excel'],['csv','CSV'],['json','JSON'],['txt','Text'],['docx','Word']] as const).map(([format,label]) => <button className="button outline" key={format} onClick={() => void exportMismatches(format)}>Export {label}</button>)}</div></section>}
         </div>}
         {section === 'history' && <div className="page"><div className="page-heading"><div><p className="eyebrow">LOCAL HISTORY</p><h1>Recent files & activity</h1><p>Reopen recent sources and review saved validation and export actions.</p></div><button className="button outline" disabled={!state.recent.length && !state.activity.length} onClick={() => setShowHistoryConfirm(true)}>Clear history</button></div>
-          <section className="card source-card"><div className="card-heading"><div><h2>Recent source files</h2><p>Up to 30 file paths are kept on this device.</p></div></div><ul className="source-list">{state.recent.map((file) => <li key={file.path}><span className="file-icon">{file.name.toLowerCase().endsWith('.json') ? '{ }' : 'XLS'}</span><div><strong>{file.name}</strong><small>{file.openedAt ? new Date(file.openedAt).toLocaleString() : file.path}</small></div><button className="button quiet" onClick={() => void reopenRecent(file)}>Reopen</button></li>)}{!state.recent.length && <li className="empty-row">No recent files yet.</li>}</ul></section>
+          <section className="card source-card"><div className="card-heading"><div><h2>Recent source files</h2><p>Up to 30 file paths are kept on this device.</p></div></div><ul className="source-list">{state.recent.map((file) => <li key={file.path}><span className="file-icon">{file.name.toLowerCase().endsWith('.json') ? '{ }' : 'XLS'}</span><div><strong>{file.name}</strong><small>{file.openedAt ? new Date(file.openedAt).toLocaleString() : file.path}</small></div><div className="recent-actions"><button className="button quiet" onClick={() => void reopenRecent(file)}>Reopen</button><button className="button quiet remove-recent" aria-label={`Remove ${file.name} from recent files`} title={`Remove ${file.name} from recent files`} onClick={() => void removeRecent(file)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 14h12l1-14M9 7V4h6v3" /></svg></button></div></li>)}{!state.recent.length && <li className="empty-row">No recent files yet.</li>}</ul></section>
           <section className="card source-card"><div className="card-heading"><div><h2>Activity log</h2><p>Most recent actions appear first.</p></div></div><ul className="source-list">{state.activity.map((item) => <li key={item.id}><span className="activity-check">✓</span><div><strong>{item.action} · {item.file}</strong><small>{item.detail} · {new Date(item.at).toLocaleString()}</small></div></li>)}{!state.activity.length && <li className="empty-row">No activity recorded yet.</li>}</ul></section>
         </div>}
         {section === 'settings' && <div className="page"><div className="page-heading"><div><p className="eyebrow">WORKSPACE</p><h1>Preferences</h1><p>Choose how TC-33 Builder Pro looks and names your exports.</p></div></div>
@@ -282,12 +308,14 @@ function App(): React.JSX.Element {
             <div className="settings-row"><div><h2>Minimize to tray</h2><p>Hide the window when minimized or closed. A tray icon provides a way to restore it; turn this off to quit normally.</p></div><label className="switch"><input type="checkbox" checked={state.preferences.minimizeToTray} onChange={(event) => void updatePreferences({ minimizeToTray: event.target.checked })}/><span /></label></div>
           </section></div>}
         {section === 'team' && <div className="page"><div className="page-heading"><div><p className="eyebrow">ABOUT YOUR TEAM</p><h1>Team</h1><p>Contact your parish assessment software support team.</p></div></div><section className="team-grid">{people.map((person) => <article className="card person-card" key={person.email}><div className="person-avatar">{person.name.split(' ').map((part) => part[0]).join('')}</div><h2>{person.name}</h2><p className="person-role">{person.role}</p><a href={`tel:${person.phone}`}>☎ &nbsp;{person.phone}</a><a href={`mailto:${person.email}`}>✉ &nbsp;{person.email}</a></article>)}</section></div>}
+        <footer className="app-footer">
+          <span className="footer-status"><span className="status-dot" />{busy ? 'Working' : 'Ready'} · Files stay on this device</span>
+          <CopyrightNotice />
+        </footer>
       </motion.main>
     </div>
     {palette && <div className="modal-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPalette(false) }}><section className="command-dialog" role="dialog" aria-modal="true" aria-label="Quick actions"><input ref={paletteInput} role="combobox" aria-expanded="true" aria-controls="quick-action-list" aria-activedescendant={commands.length ? `quick-action-${activeCommandIndex}` : undefined} value={paletteQuery} onChange={(event) => { setPaletteQuery(event.target.value); setPaletteIndex(0) }} placeholder="Search actions…" aria-label="Search quick actions" onKeyDown={(event) => { if (event.key === 'Escape') setPalette(false); if (event.key === 'ArrowDown') { event.preventDefault(); setPaletteIndex((index) => Math.min(commands.length - 1, index + 1)) } if (event.key === 'ArrowUp') { event.preventDefault(); setPaletteIndex((index) => Math.max(0, index - 1)) } if (event.key === 'Enter' && commands[activeCommandIndex]) { commands[activeCommandIndex].action(); setPalette(false) } }} /><div className="command-list" id="quick-action-list" role="listbox">{commands.map((command, index) => <button id={`quick-action-${index}`} key={command.label} role="option" aria-selected={index === activeCommandIndex} onMouseEnter={() => setPaletteIndex(index)} onClick={() => { command.action(); setPalette(false) }}>{command.label}<span>↵</span></button>)}{!commands.length && <p>No matching actions.</p>}</div><footer><span>↑↓ Navigate</span><span>Enter Select</span><span>Esc Close</span></footer></section></div>}
     {showHistoryConfirm && <div className="modal-scrim"><section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="clear-title"><h2 id="clear-title">Clear saved history?</h2><p>This removes recent file paths and activity from this device. Source workbooks are not deleted.</p><div><button className="button outline" onClick={() => setShowHistoryConfirm(false)}>Cancel</button><button className="button danger" onClick={async () => { const next = api ? await api.clearHistory() : { ...state, recent: [], activity: [] }; setWorkspace(next); setShowHistoryConfirm(false) }}>Clear history</button></div></section></div>}
-        {/* <footer className="statusbar"><div className="footer-status"><span><span style={{color:'var(--accent)'}}>●</span> {busy ? 'Processing' : 'Ready'} · Your files stay on this device</span><span>Ctrl/⌘ O import · S export · F search</span></div><CopyrightNotice/></footer> */}
-
   </div>
 }
 export default App

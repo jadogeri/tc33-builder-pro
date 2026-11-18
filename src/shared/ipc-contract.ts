@@ -8,6 +8,7 @@ export interface IPCContract {
   openSources: { args: [kind?: 'all' | 'json']; result: SourceFile[] }
   importDroppedSources: { args: [sources: DroppedSource[]]; result: SourceFile[] }
   reopenSource: { args: [path: string]; result: SourceFile }
+  removeRecentFile: { args: [path: string]; result: WorkspaceState }
   recordActivity: { args: [entry: ActivityInput]; result: WorkspaceState }
   clearHistory: { args: []; result: WorkspaceState }
   saveExport: { args: [name: string, bytes: Uint8Array]; result: boolean }

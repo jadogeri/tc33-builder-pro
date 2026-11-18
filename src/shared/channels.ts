@@ -17,6 +17,7 @@ export const channels = {
   openSources: 'workspace:open',
   importDroppedSources: 'workspace:import-dropped',
   reopenSource: 'workspace:reopen',
+  removeRecentFile: 'workspace:remove-recent',
   recordActivity: 'workspace:activity',
   clearHistory: 'workspace:clear',
   saveExport: 'workspace:export',

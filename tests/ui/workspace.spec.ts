@@ -14,9 +14,10 @@ test('workspace navigation and theme preferences are usable', async ({ page }) =
 
 test('command palette opens and filters keyboard actions', async ({ page }) => {
   await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Assessment workspace' })).toBeVisible()
   await page.keyboard.press('Control+k')
   await expect(page.getByRole('dialog', { name: 'Quick actions' })).toBeVisible()
-  await page.getByRole('textbox', { name: 'Search quick actions' }).fill('preferences')
+  await page.getByRole('combobox', { name: 'Search quick actions' }).fill('preferences')
   await expect(page.getByRole('option', { name: 'Open preferences' })).toBeVisible()
   await expect(page.getByRole('option', { name: 'Validate batch' })).toHaveCount(0)
   await page.keyboard.press('Escape')
@@ -29,6 +30,77 @@ test('history screen explains local clearing before any records exist', async ({
   await expect(page.getByText('No recent files yet.')).toBeVisible()
   await expect(page.getByText('No activity recorded yet.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Clear history' })).toBeDisabled()
+})
+
+test('workspace pins its shell, cycles theme, and shows version and copyright', async ({ page }) => {
+  await page.addInitScript(() => {
+    let workspace = {
+      preferences: {
+        theme: 'light', minimizeToTray: false, notifications: false, filename: 'tc33',
+        dateFormat: 'none', defaultDistrict: '', defaultTaxYear: '', jsonFilename: ''
+      },
+      recent: [], activity: []
+    }
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: {
+        getWorkspace: async () => workspace,
+        setPreferences: async (preferences: typeof workspace.preferences) => {
+          workspace = { ...workspace, preferences }
+          return preferences
+        },
+        rendererReady: async () => undefined,
+        onCommand: () => () => undefined,
+        onToast: () => () => undefined
+      }
+    })
+  })
+  await page.goto('/')
+  await expect(page.getByText('v1')).toBeVisible()
+  await expect(page.getByText(/All rights reserved/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Theme: light. Switch theme' })).toBeVisible()
+  await page.getByRole('button', { name: 'Theme: light. Switch theme' }).click()
+  await expect(page.locator('.app-shell')).toHaveAttribute('data-theme', 'dark')
+  await expect.poll(() => page.locator('.result-output').evaluate((node) => {
+    const style = getComputedStyle(node)
+    return parseFloat(style.maxHeight)
+  })).toBeGreaterThan(300)
+  await expect(page.locator('.result-output')).toHaveCSS('overflow-y', 'auto')
+  await expect.poll(() => page.locator('.titlebar').evaluate((node) => getComputedStyle(node).position)).toBe('sticky')
+  await expect.poll(() => page.locator('.sidebar').evaluate((node) => getComputedStyle(node).position)).toBe('sticky')
+  await expect.poll(() => page.locator('.app-footer').evaluate((node) => getComputedStyle(node).position)).toBe('sticky')
+})
+
+test('removes one recent-file entry without deleting its source', async ({ page }) => {
+  await page.addInitScript(() => {
+    let workspace = {
+      preferences: {
+        theme: 'light', minimizeToTray: false, notifications: false, filename: 'tc33',
+        dateFormat: 'none', defaultDistrict: '', defaultTaxYear: '', jsonFilename: ''
+      },
+      recent: [{ name: 'source.xlsx', path: '/mock/source.xlsx', openedAt: '2026-11-18T10:00:00.000Z' }],
+      activity: []
+    }
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: {
+        getWorkspace: async () => workspace,
+        removeRecentFile: async (path: string) => {
+          workspace = { ...workspace, recent: workspace.recent.filter((file) => file.path !== path) }
+          return workspace
+        },
+        rendererReady: async () => undefined,
+        onCommand: () => () => undefined,
+        onToast: () => () => undefined
+      }
+    })
+  })
+  page.on('dialog', (dialog) => void dialog.accept())
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Recent & activity' }).click()
+  await expect(page.getByText('source.xlsx')).toBeVisible()
+  await page.getByRole('button', { name: 'Remove source.xlsx from recent files' }).click()
+  await expect(page.getByText('No recent files yet.')).toBeVisible()
 })
 
 test('imports JSON metadata, shows validation issues, and offers all report formats', async ({ page }) => {

@@ -3,7 +3,7 @@ import { basename, extname, join } from 'node:path'
 import { mkdir, readFile, writeFile, stat } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { channels } from '../shared/channels'
-import { getSettings, setTheme, getWorkspace, setPreferences, rememberFile, recordActivity, clearHistory } from './settings'
+import { getSettings, setTheme, getWorkspace, setPreferences, rememberFile, removeRecentFile, recordActivity, clearHistory } from './settings'
 import { notify, registerTray, unregisterTray } from './desktop'
 import { z } from 'zod'
 import { assertTrustedSender } from './trust'
@@ -96,6 +96,10 @@ export function registerIPC(): void {
     z.string().max(4096).parse(filePath)
     if (!getWorkspace().recent.some((file) => file.path === filePath)) throw new Error('File is not in recent history. Import it again.')
     return readSource(filePath)
+  })
+  handle('removeRecentFile', (_event, filePath) => {
+    z.string().min(1).max(4096).parse(filePath)
+    return removeRecentFile(filePath)
   })
   handle('recordActivity', (event, input) => {
     const state = recordActivity(input)
