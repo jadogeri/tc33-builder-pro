@@ -39,6 +39,7 @@ export interface DesktopAPI {
   openSources: (kind?: 'all' | 'json') => Promise<SourceFile[]>
   importDroppedSources: (sources: DroppedSource[]) => Promise<SourceFile[]>
   reopenSource: (path: string) => Promise<SourceFile>
+  removeRecentFile: (path: string) => Promise<WorkspaceState>
   recordActivity: (entry: ActivityInput) => Promise<WorkspaceState>
   clearHistory: () => Promise<WorkspaceState>
   saveExport: (name: string, bytes: Uint8Array) => Promise<boolean>

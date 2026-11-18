@@ -35,3 +35,37 @@
 .export-formats { display: flex; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 800px) { .drop-overlay { inset: 56px 10px 10px 72px; } }
 @media (max-width: 560px) { .drop-overlay { inset: 56px 8px 8px; font-size: 15px; } .source-card .card-heading { align-items: flex-start; flex-direction: column; } }
+
+#root { height: 100vh; overflow: hidden; }
+.app-shell { height: 100vh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.titlebar { position: sticky; top: 0; z-index: 20; flex: 0 0 48px; }
+.theme-toggle { width: 42px; height: 38px; margin: 0 12px 0 auto; padding: 8px; display: grid; place-items: center; border: 1px solid #ffffff35; border-radius: 6px; background: transparent; color: #edf2f5; cursor: pointer; -webkit-app-region: no-drag; }
+.theme-toggle:hover { background: #ffffff18; }
+.theme-toggle:focus-visible { outline: 2px solid #ffb469; outline-offset: 2px; }
+.theme-toggle svg { width: 20px; height: 20px; }
+.app-body { flex: 1; min-height: 0; overflow: hidden; }
+.sidebar { position: sticky; top: 0; height: 100%; flex-shrink: 0; overflow-y: auto; }
+.sidebar-foot { gap: 8px; }
+.sidebar-foot-label { min-width: 0; }
+.sidebar-version { margin-left: auto; font-weight: 700; letter-spacing: .35px; }
+.main-content { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 0; }
+.result-output { min-height: 260px; max-height: min(65vh, 620px); overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.app-footer { position: sticky; bottom: 0; z-index: 5; width: min(100%, 1050px); margin: auto auto 0; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--line); background: var(--bg); color: var(--muted); font-size: 10px; }
+.footer-status { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.app-footer .copyright { margin: 0; text-align: right; }
+.recent-actions { display: inline-flex; flex: none; align-items: center; gap: 6px; }
+.remove-recent { width: 34px; min-width: 34px; height: 34px; padding: 7px; color: #bd4139 !important; }
+.remove-recent svg { width: 18px; height: 18px; }
+@media (max-width: 800px) {
+  .sidebar-foot { display: flex; justify-content: center; padding: 14px 0 3px; }
+  .sidebar-foot-label { display: none; }
+  .sidebar-version { margin-left: 0; }
+}
+@media (max-height: 640px) {
+  .result-output { min-height: 180px; max-height: 55vh; }
+}
+@media (max-width: 560px) {
+  .theme-toggle { width: 36px; height: 36px; margin-right: 7px; }
+  .app-footer { align-items: flex-start; flex-direction: column; gap: 5px; padding: 9px 12px; }
+  .app-footer .copyright { text-align: left; }
+}

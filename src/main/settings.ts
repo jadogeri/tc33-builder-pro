@@ -41,6 +41,12 @@ export function getWorkspace(): WorkspaceState {
 export function rememberFile(file: RecentFile): void {
   store.set('recent', [file, ...getWorkspace().recent.filter((r) => r.path !== file.path)].slice(0, 30))
 }
+export function removeRecentFile(filePath: string): WorkspaceState {
+  const recent = getWorkspace().recent
+  if (!recent.some((file) => file.path === filePath)) throw new Error('File is not in recent history.')
+  store.set('recent', recent.filter((file) => file.path !== filePath))
+  return getWorkspace()
+}
 export function recordActivity(input: ActivityInput): WorkspaceState {
   const entry = activitySchema.parse(input)
   store.set('activity', [{ ...entry, id: randomUUID(), at: new Date().toISOString() }, ...getWorkspace().activity].slice(0, 200))

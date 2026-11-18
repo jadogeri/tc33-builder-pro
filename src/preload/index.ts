@@ -30,6 +30,7 @@ const api: DesktopAPI = {
   openSources: (kind) => invoke('openSources', kind),
   importDroppedSources: (sources) => invoke('importDroppedSources', sources),
   reopenSource: (path) => invoke('reopenSource', path),
+  removeRecentFile: (path) => invoke('removeRecentFile', path),
   recordActivity: (entry) => invoke('recordActivity', entry),
   clearHistory: () => invoke('clearHistory'),
   saveExport: (name, bytes) => invoke('saveExport', name, bytes),
