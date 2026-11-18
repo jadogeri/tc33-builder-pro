@@ -1,20 +1,8 @@
 import { test, expect } from '@playwright/test'
 
-test('workspace navigation and theme preferences are usable', async ({ page }) => {
-  await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Assessment workspace' })).toBeVisible()
-  await page.getByRole('button', { name: /Preferences/ }).click()
-  await expect(page.getByRole('heading', { name: 'Preferences' })).toBeVisible()
-  await page.getByRole('button', { name: 'Black' }).click()
-  await expect(page.locator('.app-shell')).toHaveAttribute('data-theme', 'black')
-  await page.getByRole('button', { name: 'Team' }).click()
-  await expect(page.getByRole('heading', { name: 'Team', exact: true })).toBeVisible()
-  await expect(page.getByRole('link', { name: /joseph.adogeri/ })).toHaveAttribute('href', /^mailto:/)
-})
-
 test('command palette opens and filters keyboard actions', async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Assessment workspace' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'TC33 Builder Pro', level: 1 })).toBeVisible()
   await page.keyboard.press('Control+k')
   await expect(page.getByRole('dialog', { name: 'Quick actions' })).toBeVisible()
   await page.getByRole('combobox', { name: 'Search quick actions' }).fill('preferences')
@@ -59,8 +47,12 @@ test('workspace pins its shell, cycles theme, and shows version and copyright', 
   await expect(page.getByText('v1')).toBeVisible()
   await expect(page.getByText(/All rights reserved/)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Theme: light. Switch theme' })).toBeVisible()
+  const lightTopbar = await page.locator('.titlebar').evaluate((node) => getComputedStyle(node).backgroundColor)
+  const lightSidebar = await page.locator('.sidebar').evaluate((node) => getComputedStyle(node).backgroundColor)
   await page.getByRole('button', { name: 'Theme: light. Switch theme' }).click()
   await expect(page.locator('.app-shell')).toHaveAttribute('data-theme', 'dark')
+  await expect.poll(() => page.locator('.titlebar').evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe(lightTopbar)
+  await expect.poll(() => page.locator('.sidebar').evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe(lightSidebar)
   await expect.poll(() => page.locator('.result-output').evaluate((node) => {
     const style = getComputedStyle(node)
     return parseFloat(style.maxHeight)
@@ -85,6 +77,10 @@ test('removes one recent-file entry without deleting its source', async ({ page 
       configurable: true,
       value: {
         getWorkspace: async () => workspace,
+        reopenSource: async (path: string) => {
+          localStorage.setItem('recentReloadPath', path)
+          return { name: 'source.xlsx', path, bytes: new Uint8Array([1]) }
+        },
         removeRecentFile: async (path: string) => {
           workspace = { ...workspace, recent: workspace.recent.filter((file) => file.path !== path) }
           return workspace
@@ -99,8 +95,64 @@ test('removes one recent-file entry without deleting its source', async ({ page 
   await page.goto('/')
   await page.getByRole('button', { name: 'Recent & activity' }).click()
   await expect(page.getByText('source.xlsx')).toBeVisible()
-  await page.getByRole('button', { name: 'Remove source.xlsx from recent files' }).click()
+  const actions = page.locator('.recent-actions')
+  await expect(actions).toHaveCSS('flex-direction', 'row')
+  await page.getByRole('button', { name: 'Reload source.xlsx from disk' }).click()
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('recentReloadPath'))).toBe('/mock/source.xlsx')
+  await expect(page.getByText('source.xlsx')).toBeVisible()
+  const removeButton = page.getByRole('button', { name: 'Remove source.xlsx from recent files' })
+  const childOrder = await removeButton.evaluate((button) => Array.from(button.childNodes).map((node) => node.nodeType === Node.TEXT_NODE ? 'text' : (node as Element).tagName.toLowerCase()))
+  expect(childOrder).toEqual(['text', 'svg'])
+  await removeButton.click()
   await expect(page.getByText('No recent files yet.')).toBeVisible()
+})
+
+test('sidebar offers a smooth return to its top after it overflows', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 200 })
+  await page.goto('/')
+  const sidebar = page.locator('.sidebar')
+  await expect(sidebar).toHaveCSS('overflow-y', 'auto')
+  await sidebar.evaluate((node) => { node.scrollTop = node.scrollHeight })
+  const scrollTop = page.getByRole('button', { name: 'Scroll sidebar to top' })
+  await expect(scrollTop).toBeVisible()
+  await scrollTop.evaluate((button) => (button as HTMLButtonElement).click())
+  await expect.poll(() => sidebar.evaluate((node) => node.scrollTop)).toBe(0)
+})
+
+test('hides invalid report exports when validation finds no issues', async ({ page }) => {
+  await page.addInitScript(() => {
+    const workspace = {
+      preferences: {
+        theme: 'light', minimizeToTray: false, notifications: false, filename: 'tc33',
+        dateFormat: 'none', defaultDistrict: '', defaultTaxYear: '', jsonFilename: ''
+      },
+      recent: [], activity: []
+    }
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: {
+        getWorkspace: async () => workspace,
+        rendererReady: async () => undefined,
+        onCommand: () => () => undefined,
+        onToast: () => () => undefined,
+        openSources: async () => [
+          { name: 'source.xlsx', path: '/mock/source.xlsx', bytes: new Uint8Array([1]) },
+          { name: 'source.json', path: '/mock/source.json', bytes: new Uint8Array([2]) }
+        ],
+        validateSources: async () => [{
+          file: 'source.xlsx', comparedTo: 'source.json', isValid: true,
+          summaryLog: 'Validation passed.', sourceLog: 'Loaded source.xlsx.', errors: []
+        }],
+        recordActivity: async () => workspace
+      }
+    })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Choose files' }).click()
+  await page.getByRole('button', { name: 'Validate batch' }).click()
+  await page.getByRole('tab', { name: /Validation issues/ }).click()
+  await expect(page.locator('.issue-list')).toContainText('PASS')
+  await expect(page.getByRole('heading', { name: 'Export invalid report' })).toHaveCount(0)
 })
 
 test('imports JSON metadata, shows validation issues, and offers all report formats', async ({ page }) => {

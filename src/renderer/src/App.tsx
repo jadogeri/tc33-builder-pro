@@ -44,6 +44,8 @@ function App(): React.JSX.Element {
   const paletteInput = useRef<HTMLInputElement>(null)
   const runLogTab = useRef<HTMLButtonElement>(null)
   const issuesTab = useRef<HTMLButtonElement>(null)
+  const sidebarRef = useRef<HTMLElement>(null)
+  const [showSidebarScrollTop, setShowSidebarScrollTop] = useState(false)
   const commandActions = useRef<Record<string, () => void>>({})
   const api = window.api
 
@@ -139,17 +141,25 @@ function App(): React.JSX.Element {
     setMessage('Source removed from this batch. The original file was not deleted.')
   }
 
-  async function reopenRecent(file: RecentFile) {
+  async function loadRecent(file: RecentFile, navigateToWorkspace: boolean) {
     if (!api) return
     try {
       const source = await api.reopenSource(file.path)
-      const next = source
-      setSources((prev) => [...prev.filter((item) => item.path !== next.path), next])
-      if (/\.xlsx$/i.test(next.name)) setSelectedSourceIds((prev) => new Set(prev).add(next.path))
-      setSection('workspace')
-      setMessage(`Reopened ${file.name}.`)
-    } catch (error) { setMessage(`Could not reopen file: ${String(error)}`) }
+      setSources((prev) => [...prev.filter((item) => item.path !== source.path), source])
+      setSelectedSourceIds((prev) => /\.xlsx$/i.test(source.name) ? new Set(prev).add(source.path) : prev)
+      setValidationResults([])
+      if (navigateToWorkspace) {
+        setSection('workspace')
+        setMessage(`Reopened ${file.name}.`)
+      } else {
+        setMessage(`Reloaded ${file.name} from disk.`)
+      }
+      setWorkspace(await api.getWorkspace())
+    } catch (error) { setMessage(`Could not ${navigateToWorkspace ? 'reopen' : 'reload'} file: ${String(error)}`) }
   }
+
+  const reopenRecent = (file: RecentFile) => loadRecent(file, true)
+  const reloadRecent = (file: RecentFile) => loadRecent(file, false)
 
   async function removeRecent(file: RecentFile) {
     if (!window.confirm(`Remove ${file.name} from recent files? The source file and any imported batch will remain unchanged.`)) return
@@ -264,10 +274,27 @@ function App(): React.JSX.Element {
       </div>
     </header>
     <div className="app-body">
-      <aside className="sidebar" aria-label="Main navigation">
+      <aside
+        ref={sidebarRef}
+        className="sidebar"
+        aria-label="Main navigation"
+        onScroll={(event) => {
+          const sidebar = event.currentTarget
+          setShowSidebarScrollTop(sidebar.scrollHeight > sidebar.clientHeight && sidebar.scrollTop > 24)
+        }}
+      >
         <div className="sidebar-label">WORKSPACE</div>
         {([['workspace','◫','Overview'],['history','◷','Recent & activity'],['settings','⚙','Preferences'],['team','♙','Team']] as const).map(([id,icon,label]) =>
           <button key={id} className={`nav-item ${section === id ? 'selected' : ''}`} onClick={() => setSection(id)} aria-current={section === id ? 'page' : undefined}><span>{icon}</span>{label}</button>)}
+        <button
+          type="button"
+          className="sidebar-scroll-top"
+          aria-label="Scroll sidebar to top"
+          hidden={!showSidebarScrollTop}
+          onClick={() => sidebarRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+        >
+          ↑ <span>Back to top</span>
+        </button>
         <div className="sidebar-foot"><span className="status-dot" /><span className="sidebar-foot-label">Files stay on this device</span><span className="sidebar-version">v1</span></div>
       </aside>
       <motion.main
@@ -292,10 +319,10 @@ function App(): React.JSX.Element {
           </section>
           {sources.length > 0 && <section className="card source-card"><div className="card-heading"><div><h2>Imported sources</h2><p>Sources are processed locally and are not uploaded.</p></div><div className="inline-actions">{excelSources.length > 0 && <label className="select-all"><input type="checkbox" aria-label="Select all TC-33 workbooks" checked={selectedExcelSources.length === excelSources.length} onChange={(event) => setSelectedSourceIds((prev) => { const next = new Set(prev); for (const source of excelSources) event.target.checked ? next.add(source.path) : next.delete(source.path); return next })} />Select all TC-33</label>}<button className="button quiet" onClick={() => { setSources([]); setSelectedSourceIds(new Set()); setValidationResults([]) }}>Clear list</button></div></div><ul className="source-list">{sources.map((source) => { const isExcel = /\.xlsx$/i.test(source.name); const metadata = source.metadata; return <li key={source.path}>{isExcel && <input type="checkbox" aria-label={`Select ${source.name} for TC-33 export`} checked={selectedSourceIds.has(source.path)} onChange={(event) => setSelectedSourceIds((prev) => { const next = new Set(prev); event.target.checked ? next.add(source.path) : next.delete(source.path); return next })} />}<span className="file-icon">{source.name.toLowerCase().endsWith('.json') ? '{ }' : 'XLS'}</span><div><strong>{source.name}</strong><small>{metadata ? [metadata.parishName, metadata.fipsCode && `FIPS ${metadata.fipsCode}`, metadata.district && `District ${metadata.district}`, metadata.taxYear && `Tax Year ${metadata.taxYear}`].filter(Boolean).join(' · ') || 'JSON loaded; no parish metadata found' : source.name.toLowerCase().endsWith('.json') ? 'JSON loaded; no parish metadata found' : source.path}</small></div><span className="file-type">{source.name.split('.').pop()?.toUpperCase()}</span><button className="button remove-source" aria-label={`Remove ${source.name}`} title={`Remove ${source.name} from this batch`} onClick={() => removeSource(source.path)}>🗑</button></li> })}</ul></section>}
           <section className="card result-card" aria-live="polite"><div className="card-heading"><div><h2>Workspace activity</h2><p>Workbook extraction logs, validation summaries, and export results</p></div>{busy && <span className="running"><i />Working</span>}</div><div className="result-tabs" role="tablist" aria-label="Validation output" onKeyDown={(event) => { if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') { event.preventDefault(); const next = resultsTab === 'log' ? 'issues' : 'log'; setResultsTab(next); (next === 'issues' ? issuesTab : runLogTab).current?.focus() } }}><button ref={runLogTab} id="run-log-tab" role="tab" tabIndex={resultsTab === 'log' ? 0 : -1} aria-controls="run-log-panel" aria-selected={resultsTab === 'log'} onClick={() => setResultsTab('log')}>Run log</button><button ref={issuesTab} id="validation-issues-tab" role="tab" tabIndex={resultsTab === 'issues' ? 0 : -1} aria-controls="validation-issues-panel" aria-selected={resultsTab === 'issues'} onClick={() => setResultsTab('issues')}>Validation issues ({issueCount})</button></div>{resultsTab === 'log' ? <pre id="run-log-panel" role="tabpanel" aria-labelledby="run-log-tab" className="result-output">{message}</pre> : <div id="validation-issues-panel" role="tabpanel" aria-labelledby="validation-issues-tab"><ul className="issue-list">{validationResults.map((result) => <li key={`${result.file}:${result.comparedTo}`} className={result.isValid ? 'valid' : 'invalid'}><strong>{result.isValid ? 'PASS' : 'ISSUES'} · {result.file}</strong><small>Compared with {result.comparedTo}</small>{!result.isValid && <ul>{(result.errors.length ? result.errors : [result.summaryLog]).map((issue, index) => <li key={`${index}:${issue}`}>{issue}</li>)}</ul>}</li>)}{!validationResults.length && <li className="empty-row">Run batch validation to see issues by file.</li>}</ul></div>}</section>
-          {validationResults.length > 0 && <section className="card source-card"><div className="card-heading"><div><h2>Export invalid report</h2><p>Save validation issues as PDF, Excel, CSV, JSON, text, or Word.</p></div></div><div className="export-formats">{([['pdf','PDF'],['xlsx','Excel'],['csv','CSV'],['json','JSON'],['txt','Text'],['docx','Word']] as const).map(([format,label]) => <button className="button outline" key={format} onClick={() => void exportMismatches(format)}>Export {label}</button>)}</div></section>}
+          {issueLines.length > 0 && <section className="card source-card"><div className="card-heading"><div><h2>Export invalid report</h2><p>Save validation issues as PDF, Excel, CSV, JSON, text, or Word.</p></div></div><div className="export-formats">{([['pdf','PDF'],['xlsx','Excel'],['csv','CSV'],['json','JSON'],['txt','Text'],['docx','Word']] as const).map(([format,label]) => <button className="button outline" key={format} onClick={() => void exportMismatches(format)}>Export {label}</button>)}</div></section>}
         </div>}
         {section === 'history' && <div className="page"><div className="page-heading"><div><p className="eyebrow">LOCAL HISTORY</p><h1>Recent files & activity</h1><p>Reopen recent sources and review saved validation and export actions.</p></div><button className="button outline" disabled={!state.recent.length && !state.activity.length} onClick={() => setShowHistoryConfirm(true)}>Clear history</button></div>
-          <section className="card source-card"><div className="card-heading"><div><h2>Recent source files</h2><p>Up to 30 file paths are kept on this device.</p></div></div><ul className="source-list">{state.recent.map((file) => <li key={file.path}><span className="file-icon">{file.name.toLowerCase().endsWith('.json') ? '{ }' : 'XLS'}</span><div><strong>{file.name}</strong><small>{file.openedAt ? new Date(file.openedAt).toLocaleString() : file.path}</small></div><div className="recent-actions"><button className="button quiet" onClick={() => void reopenRecent(file)}>Reopen</button><button className="button quiet remove-recent" aria-label={`Remove ${file.name} from recent files`} title={`Remove ${file.name} from recent files`} onClick={() => void removeRecent(file)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 14h12l1-14M9 7V4h6v3" /></svg>Remove</button></div></li>)}{!state.recent.length && <li className="empty-row">No recent files yet.</li>}</ul></section>
+          <section className="card source-card"><div className="card-heading"><div><h2>Recent source files</h2><p>Up to 30 file paths are kept on this device.</p></div></div><ul className="source-list">{state.recent.map((file) => <li key={file.path}><span className="file-icon">{file.name.toLowerCase().endsWith('.json') ? '{ }' : 'XLS'}</span><div><strong>{file.name}</strong><small>{file.openedAt ? new Date(file.openedAt).toLocaleString() : file.path}</small></div><div className="recent-actions"><button className="button quiet" onClick={() => void reopenRecent(file)}>Reopen</button><button className="button quiet reload-recent" aria-label={`Reload ${file.name} from disk`} title={`Reload ${file.name} from disk`} onClick={() => void reloadRecent(file)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 7v5h-5M4 17v-5h5" /><path d="M5.6 9A7 7 0 0 1 18 6.5L20 12M4 12l2 5.5A7 7 0 0 0 18.4 15" /></svg></button><button className="button quiet remove-recent" aria-label={`Remove ${file.name} from recent files`} title={`Remove ${file.name} from recent files`} onClick={() => void removeRecent(file)}>Remove <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 14h12l1-14M9 7V4h6v3" /></svg></button></div></li>)}{!state.recent.length && <li className="empty-row">No recent files yet.</li>}</ul></section>
           <section className="card source-card"><div className="card-heading"><div><h2>Activity log</h2><p>Most recent actions appear first.</p></div></div><ul className="source-list">{state.activity.map((item) => <li key={item.id}><span className="activity-check">✓</span><div><strong>{item.action} · {item.file}</strong><small>{item.detail} · {new Date(item.at).toLocaleString()}</small></div></li>)}{!state.activity.length && <li className="empty-row">No activity recorded yet.</li>}</ul></section>
         </div>}
         {section === 'settings' && <div className="page"><div className="page-heading"><div><p className="eyebrow">WORKSPACE</p><h1>Preferences</h1><p>Choose how TC-33 Builder Pro looks and names your exports.</p></div></div>

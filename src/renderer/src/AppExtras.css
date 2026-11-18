@@ -53,9 +53,23 @@
 .app-footer { position: sticky; bottom: 0; z-index: 5; width: min(100%, 1050px); margin: auto auto 0; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--line); background: var(--bg); color: var(--muted); font-size: 10px; }
 .footer-status { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .app-footer .copyright { margin: 0; text-align: right; }
-.recent-actions { display: inline-flex; flex: none; align-items: center; gap: 6px; }
-.remove-recent { width: 34px; min-width: 34px; height: 34px; padding: 7px; color: #bd4139 !important; }
+.recent-actions { display: inline-flex; flex: none; flex-direction: row; align-items: center; gap: 6px; white-space: nowrap; }
+.reload-recent { width: 34px; min-width: 34px; height: 34px; padding: 7px; }
+.reload-recent svg { width: 18px; height: 18px; }
+.remove-recent { width: auto; min-width: 0; height: 34px; padding: 6px 8px; display: inline-flex; align-items: center; gap: 6px; color: #bd4139 !important; }
 .remove-recent svg { width: 18px; height: 18px; }
+.titlebar, .sidebar { background: var(--navy); }
+.sidebar { color: var(--nav-text, #c4d0db); }
+.sidebar-label { color: var(--nav-muted, #8295a7); }
+.nav-item { color: var(--nav-text, #c6d0d9); }
+.nav-item:hover, .nav-item.selected { color: var(--nav-active, #fff); }
+.sidebar-scroll-top { position: absolute; right: 12px; bottom: 8px; left: 12px; z-index: 2; margin: 0; padding: 8px 10px; border: 1px solid #ffffff35; border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; opacity: .85; transition: opacity .18s ease, transform .18s ease; }
+.sidebar-scroll-top:hover { opacity: 1; transform: translateY(-2px); }
+.sidebar-scroll-top[hidden] { display: none; }
+.source-list li > .recent-actions { flex-direction: row; }
+.app-shell[data-theme="light"] { --nav-text: #c4d0db; --nav-muted: #8295a7; --nav-active: #fff; }
+.app-shell[data-theme="dark"] { --nav-text: #d2dce5; --nav-muted: #91a2b1; --nav-active: #fff; }
+.app-shell[data-theme="black"] { --nav-text: #e2e2e2; --nav-muted: #aaa; --nav-active: #fff; }
 @media (max-width: 800px) {
   .sidebar-foot { display: flex; justify-content: center; padding: 14px 0 3px; }
   .sidebar-foot-label { display: none; }
