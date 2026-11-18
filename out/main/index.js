@@ -110,6 +110,12 @@ function getWorkspace() {
 function rememberFile(file) {
   store.set("recent", [file, ...getWorkspace().recent.filter((r) => r.path !== file.path)].slice(0, 30));
 }
+function removeRecentFile(filePath) {
+  const recent = getWorkspace().recent;
+  if (!recent.some((file) => file.path === filePath)) throw new Error("File is not in recent history.");
+  store.set("recent", recent.filter((file) => file.path !== filePath));
+  return getWorkspace();
+}
 function recordActivity(input) {
   const entry = activitySchema.parse(input);
   store.set("activity", [{ ...entry, id: node_crypto.randomUUID(), at: (/* @__PURE__ */ new Date()).toISOString() }, ...getWorkspace().activity].slice(0, 200));
@@ -146,6 +152,7 @@ const channels = {
   openSources: "workspace:open",
   importDroppedSources: "workspace:import-dropped",
   reopenSource: "workspace:reopen",
+  removeRecentFile: "workspace:remove-recent",
   recordActivity: "workspace:activity",
   clearHistory: "workspace:clear",
   saveExport: "workspace:export",
@@ -1253,6 +1260,10 @@ function registerIPC() {
     zod.z.string().max(4096).parse(filePath);
     if (!getWorkspace().recent.some((file) => file.path === filePath)) throw new Error("File is not in recent history. Import it again.");
     return readSource(filePath);
+  });
+  handle("removeRecentFile", (_event, filePath) => {
+    zod.z.string().min(1).max(4096).parse(filePath);
+    return removeRecentFile(filePath);
   });
   handle("recordActivity", (event, input) => {
     const state2 = recordActivity(input);

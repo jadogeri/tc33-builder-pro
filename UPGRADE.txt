@@ -1,10 +1,15 @@
 Using cod in Workspace.txt as reference
-1 Add Footer using copyright
-2 Add theme icon at top similar to         <div className="top-actions"><span className="local-badge">Local & private</span>
-          <button title={`Theme: ${theme}. Switch theme`} aria-label={`Theme: ${theme}`} onClick={() => setTheme(theme === 'light' ? 'dark' : theme === 'dark' ? 'contrast' : 'light')}><Icon name="sun"/></button>
-          <button className="primary" disabled={!!busy} onClick={openFiles}><Icon name="plus"/>Import files</button>
-        </div>
-3 update sidebar and top bar and footer to sticky 
-4 make run log are height bigger add scroll if logs get too long
-5 add version v1 on sidebar
-6 Add remove button functionality next to reopen button 
+1 Recent & activity: Add reload icon right of reopen
+2 Recent & activity: Add remove text left of trash can icon
+3 Recent & activity: align horizontally reload and remove button
+4 All sidebars: Add hover that scrolls slowly to top that appears if user passes actual height
+5 Hide Export invalid report if no errors were found
+6 Sidebar and top bar should be affected by theme
+7 Increase splash seconds 2 or 3 for   void splash.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(
+    '<!doctype html><html lang="en"><title>Starting TC33</title><body style="background:#182c40;color:#fff;font:20px system-ui;text-align:center;padding:60px 10px"><h1 style="color:#ffb45e">TC33 Builder Pro</h1><p role="status">Opening your workspace…</p></body></html>'
+  ))
+
+fix bug
+json and xls files names should be the same and not change to hash example
+30e59b64-28d3-41e0-8489-296c60bb8b47.xlsx
+C:\Users\joseph.adogeri\AppData\Roaming\tc33-builder-pro\dropped-sources\30e59b64-28d3-41e0-8489-296c60bb8b47.xlsx
