@@ -1,11 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { BatchGenerationResult, BatchValidationResult, Preferences, RecentFile, SourceFile, WorkspaceState } from '../../shared/types'
+import { motion } from 'framer-motion'
+import type { BatchGenerationResult, BatchValidationResult, MismatchExportFormat, Preferences, RecentFile, SourceFile, WorkspaceState } from '../../shared/types'
 import './App.css'
+import './AppExtras.css'
 
 type Section = 'workspace' | 'history' | 'settings' | 'team'
+type ResultsTab = 'log' | 'issues'
 const defaultPreferences: Preferences = {
   theme: 'light', minimizeToTray: false, notifications: false, filename: 'tc33', dateFormat: 'none',
-  defaultDistrict: '', defaultTaxYear: ''
+  defaultDistrict: '', defaultTaxYear: '', jsonFilename: ''
 }
 const people = [
   { name: 'Jun Bause', role: 'IT Manager', phone: '504-754-8846', email: 'jbausa@orleansassessors.com' },
@@ -26,14 +29,20 @@ const filenameFor = (preferences: Preferences) => {
 function App(): React.JSX.Element {
   const [section, setSection] = useState<Section>('workspace')
   const [sources, setSources] = useState<SourceFile[]>([])
+  const [selectedSourceIds, setSelectedSourceIds] = useState<Set<string>>(new Set())
+  const [validationResults, setValidationResults] = useState<BatchValidationResult[]>([])
+  const [resultsTab, setResultsTab] = useState<ResultsTab>('log')
   const [state, setState] = useState<WorkspaceState>({ preferences: defaultPreferences, recent: [], activity: [] })
   const [message, setMessage] = useState('Choose one or more Excel workbooks and an optional JSON comparison file.')
   const [busy, setBusy] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
   const [palette, setPalette] = useState(false)
   const [paletteQuery, setPaletteQuery] = useState('')
   const [paletteIndex, setPaletteIndex] = useState(0)
   const [showHistoryConfirm, setShowHistoryConfirm] = useState(false)
   const paletteInput = useRef<HTMLInputElement>(null)
+  const runLogTab = useRef<HTMLButtonElement>(null)
+  const issuesTab = useRef<HTMLButtonElement>(null)
   const commandActions = useRef<Record<string, () => void>>({})
   const api = window.api
 
@@ -61,26 +70,67 @@ function App(): React.JSX.Element {
     } else setState((prev) => ({ ...prev, preferences }))
   }
 
-  async function importSources() {
+  function mergeImported(picked: SourceFile[]) {
+    setValidationResults([])
+    setSources((prev) => {
+      const next = [...prev]
+      for (const source of picked) {
+        const existing = next.findIndex((item) => item.path === source.path)
+        if (existing >= 0) next.splice(existing, 1)
+        next.push(source)
+      }
+      return next
+    })
+    setSelectedSourceIds((prev) => {
+      const next = new Set(prev)
+      for (const source of picked) if (/\.xlsx$/i.test(source.name)) next.add(source.path)
+      return next
+    })
+  }
+
+  async function importSources(kind: 'all' | 'json' = 'all') {
     setBusy(true)
     try {
       if (!api) { setMessage('Run the desktop app to import files.'); return }
-      const picked = await api.openSources()
+      const picked = await api.openSources(kind)
       if (!picked.length) return
-      setSources((prev) => {
-        const next = [...prev]
-        for (const source of picked) {
-          const existing = next.findIndex((item) => item.path === source.path)
-          if (existing >= 0) next.splice(existing, 1)
-          next.push(source)
-        }
-        return next
-      })
+      mergeImported(picked)
       setWorkspace(await api.getWorkspace())
       setMessage(`Imported ${picked.length} source file${picked.length === 1 ? '' : 's'}.`)
       setSection('workspace')
     } catch (error) { setMessage(`Import failed: ${String(error)}`) }
     finally { setBusy(false) }
+  }
+
+  async function importDropped(files: FileList) {
+    setDragActive(false)
+    const supported = Array.from(files).filter((file) => /\.(xlsx|json)$/i.test(file.name))
+    if (!supported.length) { setMessage('Drop .xlsx or .json files to add them to the batch.'); return }
+    if (!api) { setMessage('Run the desktop app to import dropped files.'); return }
+    setBusy(true)
+    try {
+      const dropped = await Promise.all(supported.map(async (file) => ({
+        name: file.name,
+        bytes: new Uint8Array(await file.arrayBuffer())
+      })))
+      const imported = await api.importDroppedSources(dropped)
+      mergeImported(imported)
+      setWorkspace(await api.getWorkspace())
+      setMessage(`Imported ${imported.length} dropped source file${imported.length === 1 ? '' : 's'}.`)
+      setSection('workspace')
+    } catch (error) { setMessage(`Drop import failed: ${String(error)}`) }
+    finally { setBusy(false) }
+  }
+
+  function removeSource(path: string) {
+    setSources((prev) => prev.filter((source) => source.path !== path))
+    setSelectedSourceIds((prev) => {
+      const next = new Set(prev)
+      next.delete(path)
+      return next
+    })
+    setValidationResults([])
+    setMessage('Source removed from this batch. The original file was not deleted.')
   }
 
   async function reopenRecent(file: RecentFile) {
@@ -89,6 +139,7 @@ function App(): React.JSX.Element {
       const source = await api.reopenSource(file.path)
       const next = source
       setSources((prev) => [...prev.filter((item) => item.path !== next.path), next])
+      if (/\.xlsx$/i.test(next.name)) setSelectedSourceIds((prev) => new Set(prev).add(next.path))
       setSection('workspace')
       setMessage(`Reopened ${file.name}.`)
     } catch (error) { setMessage(`Could not reopen file: ${String(error)}`) }
@@ -96,6 +147,18 @@ function App(): React.JSX.Element {
 
   const excelSources = useMemo(() => sources.filter((source) => /\.xlsx$/i.test(source.name)), [sources])
   const jsonSources = useMemo(() => sources.filter((source) => /\.json$/i.test(source.name)), [sources])
+  const selectedExcelSources = useMemo(
+    () => excelSources.filter((source) => selectedSourceIds.has(source.path)),
+    [excelSources, selectedSourceIds]
+  )
+  const issueCount = useMemo(
+    () => validationResults.reduce((count, result) => count + (result.isValid ? 0 : Math.max(1, result.errors.length)), 0),
+    [validationResults]
+  )
+  const issueLines = useMemo(() => validationResults.flatMap((result) => {
+    if (result.isValid) return []
+    return result.errors.length ? result.errors.map((error) => `${result.file}: ${error}`) : [`${result.file}: ${result.summaryLog}`]
+  }), [validationResults])
   async function record(action: string, file: string, detail: string) {
     if (api) setWorkspace(await api.recordActivity({ action, file, detail }))
     else setState((prev) => ({ ...prev, activity: [{ id: String(Date.now()), at: new Date().toISOString(), action, file, detail }, ...prev.activity] }))
@@ -105,39 +168,45 @@ function App(): React.JSX.Element {
     if (!api) { setMessage('Run the desktop app to validate your files.'); return }
     setBusy(true)
     try {
-      const results: BatchValidationResult[] = await api.validateSources(sources)
+      const batch = sources.map((source) => ({ id: source.path, name: source.name, bytes: source.bytes }))
+      const results: BatchValidationResult[] = await api.validateSources(batch)
+      setValidationResults(results)
+      setResultsTab('log')
       const passed = results.filter((result) => result.isValid).length
       for (const result of results) {
         await record(result.isValid ? 'Validation passed' : 'Validation found mismatches', result.file, `${result.comparedTo}; ${result.errors.length} issue(s)`)
       }
       setMessage(`Batch validation: ${passed}/${results.length} workbooks passed.\n\n${results.map((result) =>
-        `${result.isValid ? 'PASS' : 'MISMATCH'}  ${result.file}  ↔  ${result.comparedTo}\n${result.summaryLog}`
+        `${result.sourceLog ? `${result.sourceLog}\n\n` : ''}${result.isValid ? 'PASS' : 'MISMATCH'}  ${result.file}  ↔  ${result.comparedTo}\n${result.summaryLog}`
       ).join('\n\n────────────────────────────────\n\n')}`)
     } catch (error) { setMessage(`Batch validation failed: ${String(error)}`) }
     finally { setBusy(false) }
   }
   async function buildAll() {
-    if (!excelSources.length) { setMessage('Import at least one Excel workbook first.'); return }
+    if (!selectedExcelSources.length) { setMessage('Select at least one Excel workbook to generate.'); return }
     if (!api) { setMessage('Run the desktop app to generate your workbooks.'); return }
     setBusy(true)
     try {
-      const results: BatchGenerationResult[] = await api.generateSources(sources)
+      const batch = sources.map((source) => ({ id: source.path, name: source.name, bytes: source.bytes }))
+      const results: BatchGenerationResult[] = await api.generateSources(batch, selectedExcelSources.map((source) => source.path))
       for (const result of results.filter((item) => item.saved)) await record('TC33 workbook exported', result.file, result.message)
-      setMessage(results.map((result) => `${result.file}: ${result.message}`).join('\n'))
+      setMessage(`Generated ${results.filter((result) => result.saved).length} of ${results.length} selected TC-33 workbooks.\n\n${results.map((result) => `${result.file}: ${result.message}`).join('\n')}`)
     } catch (error) { setMessage(`Workbook generation failed: ${String(error)}`) }
     finally { setBusy(false) }
   }
-  const mismatches = useMemo(() => {
-    const lines = message.split(/\r?\n/)
-    const issues = lines.filter((line) => /mismatch|missing group|class .* missing|validation failed|^\s*ERROR\b/i.test(line))
-    return issues.length ? issues : ['No mismatch details in the latest validation output. Run batch validation first.']
-  }, [message])
-  async function exportMismatches(format: 'pdf' | 'docx') {
-    const stem = filenameFor(state.preferences) + '-validation-mismatches'
+  async function exportMismatches(format: MismatchExportFormat) {
+    if (!validationResults.length) { setMessage('Run batch validation before exporting the invalid report.'); return }
+    const ext = format === 'txt' ? 'txt' : format
+    const defaultStem = filenameFor(state.preferences)
+    const jsonStem = state.preferences.jsonFilename.trim() || defaultStem
+    const stem = `${format === 'json' ? jsonStem : defaultStem}-validation-mismatches`
     try {
-      const filename = `${stem}.${format}`
-      if (!api) { setMessage('Run the desktop app to export a PDF or Word report.'); return }
-      if (await api.exportMismatches(format, filename, mismatches)) { setMessage(`Saved ${filename}.`); await record('Mismatch report exported', filename, `${mismatches.length} mismatch details`) }
+      const filename = `${stem}.${ext}`
+      if (!api) { setMessage('Run the desktop app to export the invalid report.'); return }
+      if (await api.exportMismatches(format, filename, issueLines.length ? issueLines : ['No validation issues were found.'])) {
+        setMessage(`Saved ${filename}.`)
+        await record('Mismatch report exported', filename, `${issueLines.length} validation issue(s)`)
+      }
     } catch (error) { setMessage(`Could not export mismatch report: ${String(error)}`) }
   }
 
@@ -174,20 +243,29 @@ function App(): React.JSX.Element {
           <button key={id} className={`nav-item ${section === id ? 'selected' : ''}`} onClick={() => setSection(id)} aria-current={section === id ? 'page' : undefined}><span>{icon}</span>{label}</button>)}
         <div className="sidebar-foot"><span className="status-dot" /> Files stay on this device</div>
       </aside>
-      <main className="main-content">
+      <motion.main
+        className="main-content flex-1"
+        initial={{ opacity: 0, y: 5 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.18 }}
+        onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); setDragActive(true) } }}
+        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false) }}
+        onDrop={(event) => { event.preventDefault(); void importDropped(event.dataTransfer.files) }}
+      >
+        {dragActive && <div className="drop-overlay" role="status">Drop Excel workbooks and JSON files to add them to this batch</div>}
         {section === 'workspace' && <div className="page">
           <div className="page-heading"><div><p className="eyebrow">TC-33 ACTIVE RECAP</p><h1>Assessment workspace</h1><p>Build clean recap workbooks and compare source data to your PSR JSON.</p></div><button className="button quiet" onClick={() => setPalette(true)}>⌘K <span>Quick actions</span></button></div>
-          <section className="hero-card"><div className="hero-copy"><span className="eyebrow">YOUR LOCAL WORKSPACE</span><h2>Move from source data to a finished recap.</h2><p>Import spreadsheets in batches, validate against your JSON, and export print-ready TC-33 workbooks.</p><button className="button primary" disabled={busy} onClick={() => void importSources()}>＋ &nbsp;Import files</button></div><div className="hero-mark" aria-hidden="true">33</div></section>
+          <section className="hero-card"><div className="hero-copy"><span className="eyebrow">YOUR LOCAL WORKSPACE</span><h2>Move from source data to a finished recap.</h2><p>Import spreadsheets in batches, validate against your JSON, and export print-ready TC-33 workbooks.</p><div className="inline-actions"><button className="button primary" disabled={busy} onClick={() => void importSources()}>＋ &nbsp;Import files</button><button className="button hero-secondary" disabled={busy} onClick={() => void importSources('json')}>Select JSON schema</button></div></div><div className="hero-mark" aria-hidden="true">33</div></section>
           <div className="stats-row"><div className="stat-card"><span>Excel workbooks</span><strong>{excelSources.length}</strong></div><div className="stat-card"><span>JSON comparisons</span><strong>{jsonSources.length}</strong></div><div className="stat-card"><span>Recent files</span><strong>{state.recent.length}</strong></div></div>
           <div className="section-heading"><div><h2>Batch workflow</h2><p>Each workbook uses a same-name JSON file when available; otherwise, the first imported JSON is used.</p></div></div>
           <section className="card workflow">
-            <div className="workflow-step"><span className="step-number">01</span><div><h3>Import source files</h3><p>Choose up to 50 Excel and JSON files. District and tax year are read from the SQL tab when present.</p></div><button className="button outline" disabled={busy} onClick={() => void importSources()}>Choose files</button></div>
+            <div className="workflow-step"><span className="step-number">01</span><div><h3>Import source files</h3><p>Choose files or drop up to 50 Excel workbooks and JSON schemas. JSON parish, FIPS, district, and tax year appear below.</p></div><div className="inline-actions"><button className="button outline" disabled={busy} onClick={() => void importSources()}>Choose files</button><button className="button outline" disabled={busy} onClick={() => void importSources('json')}>Select JSON schema</button></div></div>
             <div className="workflow-step"><span className="step-number">02</span><div><h3>Validate your batch</h3><p>Find differences between spreadsheet rows and the matching PSR data.</p></div><button className="button outline" disabled={busy || !excelSources.length || !jsonSources.length} onClick={() => void validateAll()}>Validate batch</button></div>
-            <div className="workflow-step"><span className="step-number">03</span><div><h3>Generate TC-33 workbooks</h3><p>Export one print-ready workbook per source Excel file.</p></div><button className="button primary" disabled={busy || !excelSources.length} onClick={() => void buildAll()}>Generate workbooks</button></div>
+            <div className="workflow-step"><span className="step-number">03</span><div><h3>Generate TC-33 workbooks</h3><p>Select one or more source spreadsheets, or use Select all to export the whole batch.</p></div><button className="button primary" disabled={busy || !selectedExcelSources.length} onClick={() => void buildAll()}>Generate selected ({selectedExcelSources.length})</button></div>
           </section>
-          {sources.length > 0 && <section className="card source-card"><div className="card-heading"><div><h2>Imported sources</h2><p>Sources are processed locally and are not uploaded.</p></div><button className="button quiet" onClick={() => setSources([])}>Clear list</button></div><ul className="source-list">{sources.map((source) => <li key={source.path}><span className="file-icon">{source.name.toLowerCase().endsWith('.json') ? '{ }' : 'XLS'}</span><div><strong>{source.name}</strong><small>{source.path}</small></div><span className="file-type">{source.name.split('.').pop()?.toUpperCase()}</span></li>)}</ul></section>}
-          <section className="card result-card" aria-live="polite"><div className="card-heading"><div><h2>Workspace activity</h2><p>Validation summaries and export results</p></div>{busy && <span className="running"><i />Working</span>}</div><pre className="result-output">{message}</pre></section>
-          {jsonSources.length > 0 && <section className="card source-card"><div className="card-heading"><div><h2>Export mismatch details</h2><p>Create a shareable PDF or Word report from the latest validation output.</p></div><div className="inline-actions"><button className="button outline" onClick={() => void exportMismatches('pdf')}>Export PDF</button><button className="button outline" onClick={() => void exportMismatches('docx')}>Export Word</button></div></div></section>}
+          {sources.length > 0 && <section className="card source-card"><div className="card-heading"><div><h2>Imported sources</h2><p>Sources are processed locally and are not uploaded.</p></div><div className="inline-actions">{excelSources.length > 0 && <label className="select-all"><input type="checkbox" aria-label="Select all TC-33 workbooks" checked={selectedExcelSources.length === excelSources.length} onChange={(event) => setSelectedSourceIds((prev) => { const next = new Set(prev); for (const source of excelSources) event.target.checked ? next.add(source.path) : next.delete(source.path); return next })} />Select all TC-33</label>}<button className="button quiet" onClick={() => { setSources([]); setSelectedSourceIds(new Set()); setValidationResults([]) }}>Clear list</button></div></div><ul className="source-list">{sources.map((source) => { const isExcel = /\.xlsx$/i.test(source.name); const metadata = source.metadata; return <li key={source.path}>{isExcel && <input type="checkbox" aria-label={`Select ${source.name} for TC-33 export`} checked={selectedSourceIds.has(source.path)} onChange={(event) => setSelectedSourceIds((prev) => { const next = new Set(prev); event.target.checked ? next.add(source.path) : next.delete(source.path); return next })} />}<span className="file-icon">{source.name.toLowerCase().endsWith('.json') ? '{ }' : 'XLS'}</span><div><strong>{source.name}</strong><small>{metadata ? [metadata.parishName, metadata.fipsCode && `FIPS ${metadata.fipsCode}`, metadata.district && `District ${metadata.district}`, metadata.taxYear && `Tax Year ${metadata.taxYear}`].filter(Boolean).join(' · ') || 'JSON loaded; no parish metadata found' : source.name.toLowerCase().endsWith('.json') ? 'JSON loaded; no parish metadata found' : source.path}</small></div><span className="file-type">{source.name.split('.').pop()?.toUpperCase()}</span><button className="button remove-source" aria-label={`Remove ${source.name}`} title={`Remove ${source.name} from this batch`} onClick={() => removeSource(source.path)}>🗑</button></li> })}</ul></section>}
+          <section className="card result-card" aria-live="polite"><div className="card-heading"><div><h2>Workspace activity</h2><p>Workbook extraction logs, validation summaries, and export results</p></div>{busy && <span className="running"><i />Working</span>}</div><div className="result-tabs" role="tablist" aria-label="Validation output" onKeyDown={(event) => { if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') { event.preventDefault(); const next = resultsTab === 'log' ? 'issues' : 'log'; setResultsTab(next); (next === 'issues' ? issuesTab : runLogTab).current?.focus() } }}><button ref={runLogTab} id="run-log-tab" role="tab" tabIndex={resultsTab === 'log' ? 0 : -1} aria-controls="run-log-panel" aria-selected={resultsTab === 'log'} onClick={() => setResultsTab('log')}>Run log</button><button ref={issuesTab} id="validation-issues-tab" role="tab" tabIndex={resultsTab === 'issues' ? 0 : -1} aria-controls="validation-issues-panel" aria-selected={resultsTab === 'issues'} onClick={() => setResultsTab('issues')}>Validation issues ({issueCount})</button></div>{resultsTab === 'log' ? <pre id="run-log-panel" role="tabpanel" aria-labelledby="run-log-tab" className="result-output">{message}</pre> : <div id="validation-issues-panel" role="tabpanel" aria-labelledby="validation-issues-tab"><ul className="issue-list">{validationResults.map((result) => <li key={`${result.file}:${result.comparedTo}`} className={result.isValid ? 'valid' : 'invalid'}><strong>{result.isValid ? 'PASS' : 'ISSUES'} · {result.file}</strong><small>Compared with {result.comparedTo}</small>{!result.isValid && <ul>{(result.errors.length ? result.errors : [result.summaryLog]).map((issue, index) => <li key={`${index}:${issue}`}>{issue}</li>)}</ul>}</li>)}{!validationResults.length && <li className="empty-row">Run batch validation to see issues by file.</li>}</ul></div>}</section>
+          {validationResults.length > 0 && <section className="card source-card"><div className="card-heading"><div><h2>Export invalid report</h2><p>Save validation issues as PDF, Excel, CSV, JSON, text, or Word.</p></div></div><div className="export-formats">{([['pdf','PDF'],['xlsx','Excel'],['csv','CSV'],['json','JSON'],['txt','Text'],['docx','Word']] as const).map(([format,label]) => <button className="button outline" key={format} onClick={() => void exportMismatches(format)}>Export {label}</button>)}</div></section>}
         </div>}
         {section === 'history' && <div className="page"><div className="page-heading"><div><p className="eyebrow">LOCAL HISTORY</p><h1>Recent files & activity</h1><p>Reopen recent sources and review saved validation and export actions.</p></div><button className="button outline" disabled={!state.recent.length && !state.activity.length} onClick={() => setShowHistoryConfirm(true)}>Clear history</button></div>
           <section className="card source-card"><div className="card-heading"><div><h2>Recent source files</h2><p>Up to 30 file paths are kept on this device.</p></div></div><ul className="source-list">{state.recent.map((file) => <li key={file.path}><span className="file-icon">{file.name.toLowerCase().endsWith('.json') ? '{ }' : 'XLS'}</span><div><strong>{file.name}</strong><small>{file.openedAt ? new Date(file.openedAt).toLocaleString() : file.path}</small></div><button className="button quiet" onClick={() => void reopenRecent(file)}>Reopen</button></li>)}{!state.recent.length && <li className="empty-row">No recent files yet.</li>}</ul></section>
@@ -197,12 +275,13 @@ function App(): React.JSX.Element {
           <section className="card settings-card"><div className="settings-row"><div><h2>Appearance</h2><p>Pick a contrast level for your workspace.</p></div><div className="theme-options" role="group" aria-label="Color theme">{(['light','dark','black','system'] as const).map((theme) => <button key={theme} aria-pressed={state.preferences.theme === theme} className={`theme-option ${state.preferences.theme === theme ? 'chosen' : ''}`} onClick={() => void updatePreferences({ theme })}><i className={`theme-swatch ${theme}`} />{theme === 'black' ? 'Black' : theme[0].toUpperCase() + theme.slice(1)}</button>)}</div></div>
             <div className="settings-row"><div><h2>Report defaults</h2><p>Used when District and Tax Year are missing from an imported workbook’s SQL metadata.</p></div><div className="preference-inputs"><label className="input-control"><span>Default district</span><input inputMode="numeric" pattern="[0-9]" maxLength={1} placeholder="e.g. 1" value={state.preferences.defaultDistrict} onChange={(event) => void updatePreferences({ defaultDistrict: event.target.value.replace(/\D/g, '').slice(0, 1) })} /></label><label className="input-control"><span>Default tax year</span><input inputMode="numeric" pattern="[0-9]{4}" maxLength={4} placeholder="e.g. 2027" value={state.preferences.defaultTaxYear} onChange={(event) => void updatePreferences({ defaultTaxYear: event.target.value.replace(/\D/g, '').slice(0, 4) })} /></label></div></div>
             <div className="settings-row"><div><h2>Export filename</h2><p>Base name used for generated TC-33 and mismatch reports.</p></div><label className="input-control"><span>File name</span><input value={state.preferences.filename} maxLength={100} onChange={(event) => void updatePreferences({ filename: event.target.value.replace(/[\\/:*?"<>|\0]/g, '').trim() || 'tc33' })} /></label></div>
+            <div className="settings-row"><div><h2>JSON report filename</h2><p>Optional custom name for JSON mismatch exports. Leave blank to reuse the standard report name.</p></div><label className="input-control"><span>Optional JSON filename</span><input value={state.preferences.jsonFilename} maxLength={100} placeholder="Use standard filename" onChange={(event) => void updatePreferences({ jsonFilename: event.target.value.replace(/[\\/:*?"<>|\0]/g, '').trim() })} /></label></div>
             <div className="settings-row"><div><h2>Date suffix</h2><p>Optionally append today’s date to export filenames.</p></div><label className="input-control"><span>Date format</span><select value={state.preferences.dateFormat} onChange={(event) => void updatePreferences({ dateFormat: event.target.value as Preferences['dateFormat'] })}><option value="none">No date</option><option value="YYYY-MM-DD">YYYY-MM-DD</option><option value="MM-DD-YYYY">MM-DD-YYYY</option><option value="YYYYMMDD">YYYYMMDD</option></select></label></div>
             <div className="settings-row"><div><h2>Desktop notifications</h2><p>Show system notifications for completed actions; an in-app message is also kept.</p></div><label className="switch"><input type="checkbox" checked={state.preferences.notifications} onChange={(event) => void updatePreferences({ notifications: event.target.checked })}/><span /></label></div>
             <div className="settings-row"><div><h2>Minimize to tray</h2><p>Hide the window when minimized or closed. A tray icon provides a way to restore it; turn this off to quit normally.</p></div><label className="switch"><input type="checkbox" checked={state.preferences.minimizeToTray} onChange={(event) => void updatePreferences({ minimizeToTray: event.target.checked })}/><span /></label></div>
           </section></div>}
         {section === 'team' && <div className="page"><div className="page-heading"><div><p className="eyebrow">ABOUT YOUR TEAM</p><h1>Team</h1><p>Contact your parish assessment software support team.</p></div></div><section className="team-grid">{people.map((person) => <article className="card person-card" key={person.email}><div className="person-avatar">{person.name.split(' ').map((part) => part[0]).join('')}</div><h2>{person.name}</h2><p className="person-role">{person.role}</p><a href={`tel:${person.phone}`}>☎ &nbsp;{person.phone}</a><a href={`mailto:${person.email}`}>✉ &nbsp;{person.email}</a></article>)}</section></div>}
-      </main>
+      </motion.main>
     </div>
     {palette && <div className="modal-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPalette(false) }}><section className="command-dialog" role="dialog" aria-modal="true" aria-label="Quick actions"><input ref={paletteInput} role="combobox" aria-expanded="true" aria-controls="quick-action-list" aria-activedescendant={commands.length ? `quick-action-${activeCommandIndex}` : undefined} value={paletteQuery} onChange={(event) => { setPaletteQuery(event.target.value); setPaletteIndex(0) }} placeholder="Search actions…" aria-label="Search quick actions" onKeyDown={(event) => { if (event.key === 'Escape') setPalette(false); if (event.key === 'ArrowDown') { event.preventDefault(); setPaletteIndex((index) => Math.min(commands.length - 1, index + 1)) } if (event.key === 'ArrowUp') { event.preventDefault(); setPaletteIndex((index) => Math.max(0, index - 1)) } if (event.key === 'Enter' && commands[activeCommandIndex]) { commands[activeCommandIndex].action(); setPalette(false) } }} /><div className="command-list" id="quick-action-list" role="listbox">{commands.map((command, index) => <button id={`quick-action-${index}`} key={command.label} role="option" aria-selected={index === activeCommandIndex} onMouseEnter={() => setPaletteIndex(index)} onClick={() => { command.action(); setPalette(false) }}>{command.label}<span>↵</span></button>)}{!commands.length && <p>No matching actions.</p>}</div><footer><span>↑↓ Navigate</span><span>Enter Select</span><span>Esc Close</span></footer></section></div>}
     {showHistoryConfirm && <div className="modal-scrim"><section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="clear-title"><h2 id="clear-title">Clear saved history?</h2><p>This removes recent file paths and activity from this device. Source workbooks are not deleted.</p><div><button className="button outline" onClick={() => setShowHistoryConfirm(false)}>Cancel</button><button className="button danger" onClick={async () => { const next = api ? await api.clearHistory() : { ...state, recent: [], activity: [] }; setWorkspace(next); setShowHistoryConfirm(false) }}>Clear history</button></div></section></div>}

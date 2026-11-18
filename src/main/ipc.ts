@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, nativeTheme } from 'electron'
-import { basename } from 'node:path'
-import { readFile, writeFile, stat } from 'node:fs/promises'
+import { basename, extname, join } from 'node:path'
+import { mkdir, readFile, writeFile, stat } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { channels } from '../shared/channels'
 import { getSettings, setTheme, getWorkspace, setPreferences, rememberFile, recordActivity, clearHistory } from './settings'
 import { notify, registerTray, unregisterTray } from './desktop'
@@ -9,15 +10,24 @@ import { assertTrustedSender } from './trust'
 import { saveFileSchema, themeSchema } from '../shared/validation'
 import { handle } from './handle'
 import { generateSources, validateSources } from './tasks'
+import { extractPsrMetadata } from '../etl/transform'
+import type { DroppedSource, MismatchExportFormat } from '../shared/types'
+import { buildMismatchExport } from './mismatch-export'
 
 export function registerIPC(): void {
-  async function readSource(filePath: string) {
+  async function readSource(filePath: string, displayName?: string) {
     if (!/\.(xlsx|json)$/i.test(filePath)) throw new Error('Select .xlsx or .json files')
     const info = await stat(filePath)
     if (!info.isFile() || info.size > 25 * 1024 * 1024) throw new Error('Each source must be smaller than 25 MB')
     const bytes = await readFile(filePath)
-    rememberFile({ name: basename(filePath), path: filePath, openedAt: new Date().toISOString() })
-    return { name: basename(filePath), path: filePath, bytes: new Uint8Array(bytes) }
+    const name = displayName ?? basename(filePath)
+    let metadata
+    if (/\.json$/i.test(name)) {
+      try { metadata = extractPsrMetadata(JSON.parse(bytes.toString('utf8'))) }
+      catch { metadata = undefined }
+    }
+    rememberFile({ name, path: filePath, openedAt: new Date().toISOString() })
+    return { name, path: filePath, bytes: new Uint8Array(bytes), ...(metadata ? { metadata } : {}) }
   }
   handle('getWorkspace', () => getWorkspace())
   handle('setPreferences', (event, input) => {
@@ -36,16 +46,18 @@ export function registerIPC(): void {
   })
   handle('rendererReady', () => {})
   handle('validateSources', (_event, sources) => validateSources(sources))
-  handle('generateSources', (event, sources) => {
+  handle('generateSources', (event, sources, selectedIds) => {
     const window = BrowserWindow.fromWebContents(event.sender)
     if (!window) throw new Error('The app window is unavailable.')
-    return generateSources(window, sources)
+    z.array(z.string().max(4096)).min(1).max(50).parse(selectedIds)
+    return generateSources(window, sources, selectedIds)
   })
-  handle('openSources', async (event) => {
+  handle('openSources', async (event, kind = 'all') => {
+    z.enum(['all', 'json']).parse(kind)
     const window = BrowserWindow.fromWebContents(event.sender)!
     const result = await dialog.showOpenDialog(window, {
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'TC33 sources', extensions: ['xlsx', 'json'] }]
+      filters: [{ name: kind === 'json' ? 'PSR JSON schema' : 'TC33 sources', extensions: kind === 'json' ? ['json'] : ['xlsx', 'json'] }]
     })
     if (result.canceled) return []
     if (result.filePaths.length > 50) throw new Error('Import at most 50 files at once')
@@ -55,6 +67,29 @@ export function registerIPC(): void {
     }
     const files = []
     for (const path of result.filePaths) files.push(await readSource(path))
+    return files
+  })
+  handle('importDroppedSources', async (_event, input: DroppedSource[]) => {
+    if (!Array.isArray(input) || input.length > 50) throw new Error('Drop at most 50 source files at once.')
+    let totalBytes = 0
+    for (const source of input) {
+      if (!source || typeof source.name !== 'string' || source.name.length > 255 ||
+          !/\.(xlsx|json)$/i.test(source.name) || !(source.bytes instanceof Uint8Array)) {
+        throw new Error('Drop valid .xlsx and .json source files.')
+      }
+      if (source.bytes.byteLength > 25 * 1024 * 1024) throw new Error('Each source file must be smaller than 25 MB.')
+      totalBytes += source.bytes.byteLength
+    }
+    if (totalBytes > 100 * 1024 * 1024) throw new Error('Select files with a combined size under 100 MB.')
+    const importDirectory = join(app.getPath('userData'), 'dropped-sources')
+    await mkdir(importDirectory, { recursive: true })
+    const files = []
+    for (const source of input) {
+      const extension = extname(source.name).toLowerCase()
+      const filePath = join(importDirectory, `${randomUUID()}${extension}`)
+      await writeFile(filePath, Buffer.from(source.bytes))
+      files.push(await readSource(filePath, basename(source.name)))
+    }
     return files
   })
   handle('reopenSource', (_event, filePath) => {
@@ -77,31 +112,12 @@ export function registerIPC(): void {
     return true
   })
   handle('exportMismatches', async (event, format, name, issues) => {
-    z.enum(['pdf', 'docx']).parse(format)
-    z.string().min(1).max(180).regex(/^[^\\/:*?"<>|\0]+\.(pdf|docx)$/i).parse(name)
+    const supportedFormats = ['pdf', 'docx', 'xlsx', 'csv', 'json', 'txt'] as const
+    z.enum(supportedFormats).parse(format)
+    z.string().min(1).max(180).regex(/^[^\\/:*?"<>|\0]+\.(pdf|docx|xlsx|csv|json|txt)$/i).parse(name)
     z.array(z.string().max(2000)).max(1000).parse(issues)
     const window = BrowserWindow.fromWebContents(event.sender)!
-    let bytes: Buffer
-    if (format === 'docx') {
-      const { Document, Packer, Paragraph, TextRun } = await import('docx')
-      const doc = new Document({ sections: [{ children: [
-        new Paragraph({ children: [new TextRun({ text: 'TC33 Validation Mismatches', bold: true, size: 30 })] }),
-        ...issues.map((line) => new Paragraph({ text: line }))
-      ] }] })
-      bytes = await Packer.toBuffer(doc)
-    } else {
-      const { jsPDF } = await import('jspdf')
-      const pdf = new jsPDF()
-      pdf.setFontSize(16); pdf.text('TC33 Validation Mismatches', 14, 18)
-      pdf.setFontSize(10)
-      const text = pdf.splitTextToSize(issues.join('\n'), 180)
-      const linesPerPage = Math.max(1, Math.floor((pdf.internal.pageSize.getHeight() - 36) / 5))
-      for (let index = 0; index < text.length; index += linesPerPage) {
-        if (index > 0) pdf.addPage()
-        pdf.text(text.slice(index, index + linesPerPage), 14, 28)
-      }
-      bytes = Buffer.from(pdf.output('arraybuffer'))
-    }
+    const bytes = await buildMismatchExport(format, issues)
     const result = await dialog.showSaveDialog(window, { defaultPath: name })
     if (result.canceled || !result.filePath) return false
     await writeFile(result.filePath, bytes)

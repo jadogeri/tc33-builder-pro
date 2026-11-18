@@ -15,7 +15,7 @@ process.on('uncaughtException', (err) => {
 })
 
 process.on('unhandledRejection', (reason) => {
-  fs.writeFileSync('crash.txt', `UNHANDLED REJECTION:\n${reason?.stack || reason}`)
+  fs.writeFileSync('crash.txt', `UNHANDLED REJECTION:\n${reason instanceof Error ? reason.stack || reason.message : String(reason)}`)
   process.exit(1)
 })
 

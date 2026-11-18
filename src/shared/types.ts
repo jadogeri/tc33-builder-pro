@@ -36,14 +36,15 @@ export interface DesktopAPI {
   windowControl: (action: 'minimize' | 'maximize' | 'close') => Promise<void>
   getWorkspace: () => Promise<WorkspaceState>
   setPreferences: (preferences: Preferences) => Promise<Preferences>
-  openSources: () => Promise<SourceFile[]>
+  openSources: (kind?: 'all' | 'json') => Promise<SourceFile[]>
+  importDroppedSources: (sources: DroppedSource[]) => Promise<SourceFile[]>
   reopenSource: (path: string) => Promise<SourceFile>
   recordActivity: (entry: ActivityInput) => Promise<WorkspaceState>
   clearHistory: () => Promise<WorkspaceState>
   saveExport: (name: string, bytes: Uint8Array) => Promise<boolean>
-  exportMismatches: (format: 'pdf' | 'docx', name: string, issues: string[]) => Promise<boolean>
+  exportMismatches: (format: MismatchExportFormat, name: string, issues: string[]) => Promise<boolean>
   validateSources: (sources: BatchSource[]) => Promise<BatchValidationResult[]>
-  generateSources: (sources: BatchSource[]) => Promise<BatchGenerationResult[]>
+  generateSources: (sources: BatchSource[], selectedIds: string[]) => Promise<BatchGenerationResult[]>
   rendererReady: () => Promise<void>
 }
 
@@ -57,8 +58,10 @@ export interface Preferences {
   dateFormat: 'none' | 'YYYY-MM-DD' | 'MM-DD-YYYY' | 'YYYYMMDD'
   defaultDistrict: string
   defaultTaxYear: string
+  jsonFilename: string
 }
-export interface SourceFile { name: string; path: string; bytes: Uint8Array }
+export interface JsonMetadata { parishName?: string; fipsCode?: string; district?: string; taxYear?: string }
+export interface SourceFile { name: string; path: string; bytes: Uint8Array; metadata?: JsonMetadata }
 export interface RecentFile { name: string; path: string; openedAt: string }
 export interface ActivityInput { action: string; file: string; detail: string }
 export interface Activity extends ActivityInput { id: string; at: string }
@@ -67,12 +70,15 @@ export interface WorkspaceState {
   recent: RecentFile[]
   activity: Activity[]
 }
-export interface BatchSource { name: string; bytes: Uint8Array }
+export interface DroppedSource { name: string; bytes: Uint8Array }
+export interface BatchSource { name: string; bytes: Uint8Array; id?: string }
+export type MismatchExportFormat = 'pdf' | 'docx' | 'xlsx' | 'csv' | 'json' | 'txt'
 export interface BatchValidationResult {
   file: string
   comparedTo: string
   isValid: boolean
   summaryLog: string
+  sourceLog: string
   errors: string[]
 }
 export interface BatchGenerationResult { file: string; saved: boolean; message: string }
