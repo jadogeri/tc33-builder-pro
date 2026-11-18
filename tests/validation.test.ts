@@ -4,15 +4,18 @@ import ExcelJS from 'exceljs'
 import { preferencesSchema, saveFileSchema, safeExternalURL, updatePercent } from '../src/shared/validation'
 import { extractXlsxFile } from '../src/etl/extract'
 import { buildTc33Workbook } from '../src/etl/load'
-import { transform } from '../src/etl/transform'
+import { extractPsrMetadata, transform } from '../src/etl/transform'
+import { runValidationPipeline } from '../src/etl/pipeline'
+import { buildMismatchExport } from '../src/main/mismatch-export'
 
 test('preferences preserve valid appearance and export defaults', () => {
   assert.deepEqual(preferencesSchema.parse({ theme: 'black', defaultDistrict: '3', defaultTaxYear: '2027' }), {
     theme: 'black', minimizeToTray: false, notifications: false, filename: 'tc33',
-    dateFormat: 'none', defaultDistrict: '3', defaultTaxYear: '2027'
+    dateFormat: 'none', defaultDistrict: '3', defaultTaxYear: '2027', jsonFilename: ''
   })
   assert.equal(preferencesSchema.safeParse({ theme: 'black', filename: '../report' }).success, false)
   assert.equal(preferencesSchema.safeParse({ theme: 'light', defaultTaxYear: '27' }).success, false)
+  assert.equal(preferencesSchema.safeParse({ jsonFilename: '../report.json' }).success, false)
 })
 
 test('save dialog filename cannot contain a path', () => {
@@ -58,4 +61,102 @@ test('workbook export requires report metadata and produces an Excel file', asyn
   const bytes = await buildTc33Workbook(report, 'test.xlsx')
   assert.equal(bytes[0], 0x50)
   assert.equal(bytes[1], 0x4b)
+})
+
+test('PSR JSON metadata exposes parish, FIPS code, district, and tax year', () => {
+  assert.deepEqual(extractPsrMetadata({
+    PSR: { ParishInformation: [{ ParishName: 'ORLEANS', ParishFipsCode: '22171', TaxYear: 2027 }] }
+  }), { parishName: 'ORLEANS', fipsCode: '22171', district: '1', taxYear: '2027' })
+})
+
+test('batch validation keeps the source workbook log and reports mismatches', async () => {
+  const workbook = new ExcelJS.Workbook()
+  const recap = workbook.addWorksheet('Export Worksheet')
+  recap.addRow(['GROUP', 'DESCRIPTION', 'UNITS', 'HOMESTEAD', 'VETERAN', 'FIRST', 'ASSESSED', 'TAXABLE'])
+  recap.addRow(['1REAL ESTATE', '30 Residential', 1, 0, 0, 0, 1000, 800])
+  recap.addRow(['', '31 Commercial', 1, 0, 0, 0, 500, 400])
+  workbook.addWorksheet('SQL').addRow(["WHERE TAX_YEAR = '2027' AND FIPS_CODE = '22171'"])
+  const workbookBytes = await workbook.xlsx.writeBuffer()
+  const excel = new File([new Uint8Array(workbookBytes).slice().buffer as ArrayBuffer], 'dist-1-data.xlsx')
+  const json = new File([JSON.stringify({
+    PSR: {
+      ParishInformation: [{ ParishName: 'ORLEANS', ParishFipsCode: '22171', TaxYear: 2027 }],
+      ActiveRecap: [{
+        Class: '30', PropertyDescription: 'Residential', AssessedValue: '950',
+        HomesteadCredit: 0, DisabledVeteranCredit: 0, FirstResponderCredit: 0,
+        TaxableValue: 800, Exemption: 0, AcresUnits: 1
+      }]
+    }
+  })], 'dist-1-data.json')
+
+  const result = await runValidationPipeline(excel, json)
+  assert.equal(result.isValid, false)
+  assert.match(result.sourceLog, /Loaded: dist-1-data\.xlsx \| Sheet: Export Worksheet/)
+  assert.match(result.summaryLog, /Validation Failed/)
+  assert.ok(result.errors.some((issue) => /totalAssessed/.test(issue)))
+  assert.ok(result.errors.some((issue) => /Class 31 missing in JSON/.test(issue)))
+})
+
+test('batch validation preserves workbook logs when the JSON is malformed', async () => {
+  const workbook = new ExcelJS.Workbook()
+  const recap = workbook.addWorksheet('Export Worksheet')
+  recap.addRow(['GROUP', 'DESCRIPTION', 'UNITS', 'HOMESTEAD', 'VETERAN', 'FIRST', 'ASSESSED', 'TAXABLE'])
+  recap.addRow(['1REAL ESTATE', '30 Residential', 1, 0, 0, 0, 1000, 800])
+  const workbookBytes = await workbook.xlsx.writeBuffer()
+  const excel = new File([new Uint8Array(workbookBytes).slice().buffer as ArrayBuffer], 'source.xlsx')
+  const json = new File(['{ invalid json'], 'broken.json')
+
+  const result = await runValidationPipeline(excel, json)
+  assert.equal(result.isValid, false)
+  assert.match(result.sourceLog, /Loaded: source\.xlsx/)
+  assert.match(result.summaryLog, /could not be read/)
+})
+
+test('batch validation rejects a JSON object without the recap array', async () => {
+  const workbook = new ExcelJS.Workbook()
+  const recap = workbook.addWorksheet('Export Worksheet')
+  recap.addRow(['GROUP', 'DESCRIPTION', 'UNITS', 'HOMESTEAD', 'VETERAN', 'FIRST', 'ASSESSED', 'TAXABLE'])
+  recap.addRow(['1REAL ESTATE', '30 Residential', 1, 0, 0, 0, 1000, 800])
+  const workbookBytes = await workbook.xlsx.writeBuffer()
+  const excel = new File([new Uint8Array(workbookBytes).slice().buffer as ArrayBuffer], 'source.xlsx')
+  const json = new File([JSON.stringify({ PSR: {} })], 'empty-schema.json')
+  const result = await runValidationPipeline(excel, json)
+  assert.equal(result.isValid, false)
+  assert.match(result.summaryLog, /ActiveRecap array/)
+})
+
+test('batch validation compares formatted numeric strings without false mismatches', async () => {
+  const workbook = new ExcelJS.Workbook()
+  const recap = workbook.addWorksheet('Export Worksheet')
+  recap.addRow(['GROUP', 'DESCRIPTION', 'UNITS', 'HOMESTEAD', 'VETERAN', 'FIRST', 'ASSESSED', 'TAXABLE'])
+  recap.addRow(['1REAL ESTATE', '30 Residential', 1, 0, 0, 0, 1000, 800])
+  workbook.addWorksheet('SQL').addRow(["WHERE TAX_YEAR = '2027' AND FIPS_CODE = '22171'"])
+  const workbookBytes = await workbook.xlsx.writeBuffer()
+  const excel = new File([new Uint8Array(workbookBytes).slice().buffer as ArrayBuffer], 'source.xlsx')
+  const json = new File([JSON.stringify({
+    PSR: {
+      ParishInformation: [{ ParishFipsCode: '22171', TaxYear: 2027 }],
+      ActiveRecap: [{
+        Class: '30', PropertyDescription: 'Residential', AssessedValue: '1,000',
+        HomesteadCredit: '0', DisabledVeteranCredit: '0', FirstResponderCredit: '0',
+        TaxableValue: '800', Exemption: '0', AcresUnits: 1
+      }]
+    }
+  })], 'source.json')
+
+  const result = await runValidationPipeline(excel, json)
+  assert.equal(result.isValid, true)
+  assert.deepEqual(result.errors, [])
+})
+
+test('invalid reports export in all six requested formats', async () => {
+  const issues = ['source.xlsx: Class 30, field "totalAssessed": expected 950, found 1,000']
+  const csv = await buildMismatchExport('csv', issues)
+  assert.match(csv.toString('utf8'), /^"Issue"\r\n/)
+  assert.match(csv.toString('utf8'), /""totalAssessed""/)
+  assert.match((await buildMismatchExport('json', issues)).toString('utf8'), /"issues"/)
+  assert.match((await buildMismatchExport('txt', issues)).toString('utf8'), /source\.xlsx/)
+  assert.equal((await buildMismatchExport('xlsx', issues)).subarray(0, 2).toString('hex'), '504b')
+  assert.equal((await buildMismatchExport('docx', issues)).subarray(0, 2).toString('hex'), '504b')
+  assert.match((await buildMismatchExport('pdf', issues)).toString('utf8', 0, 8), /^%PDF-/)
 })

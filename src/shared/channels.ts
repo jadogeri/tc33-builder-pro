@@ -15,6 +15,7 @@ export const channels = {
   getWorkspace: 'workspace:get',
   setPreferences: 'workspace:preferences',
   openSources: 'workspace:open',
+  importDroppedSources: 'workspace:import-dropped',
   reopenSource: 'workspace:reopen',
   recordActivity: 'workspace:activity',
   clearHistory: 'workspace:clear',

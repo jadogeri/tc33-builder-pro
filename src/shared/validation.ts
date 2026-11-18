@@ -7,9 +7,13 @@ export const preferencesSchema = z.object({
   notifications: z.boolean().default(false),
   filename: z.string().trim().min(1).max(100)
     .refine((name) => !/[\\/:*?"<>|\0]/.test(name) && !name.endsWith('.'), 'Use a valid filename without an extension').default('tc33'),
-  dateFormat: z.enum(['none', 'YYYY-MM-DD', 'MM-DD-YYYY', 'YYYYMMDD']).default('none')
-  ,defaultDistrict: z.string().regex(/^\d?$/, 'District must be one digit').default(''),
-  defaultTaxYear: z.string().regex(/^(|\d{4})$/, 'Tax year must be four digits').default('')
+  dateFormat: z.enum(['none', 'YYYY-MM-DD', 'MM-DD-YYYY', 'YYYYMMDD']).default('none'),
+  defaultDistrict: z.string().regex(/^\d?$/, 'District must be one digit').default(''),
+  defaultTaxYear: z.string().regex(/^(|\d{4})$/, 'Tax year must be four digits').default(''),
+  jsonFilename: z.string().trim().max(100).refine(
+    (name) => !/[\\/:*?"<>|\0]/.test(name) && !name.endsWith('.'),
+    'Use a valid filename without an extension'
+  ).default('')
 })
 export const activitySchema = z.object({
   action: z.string().max(80), file: z.string().max(255), detail: z.string().max(500)

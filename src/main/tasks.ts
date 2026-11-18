@@ -43,9 +43,25 @@ export async function validateSources(sources: BatchSource[]): Promise<BatchVali
     const json = matchingJson(excel, jsonFiles)
     try {
       const result = await runValidationPipeline(asFile(excel), asFile(json))
-      results.push({ file: excel.name, comparedTo: json.name, isValid: result.isValid, summaryLog: result.summaryLog, errors: result.errors })
+      results.push({
+        file: excel.name,
+        comparedTo: json.name,
+        isValid: result.isValid,
+        summaryLog: result.summaryLog,
+        sourceLog: result.sourceLog,
+        errors: result.errors
+      })
     } catch (error) {
-      results.push({ file: excel.name, comparedTo: json.name, isValid: false, summaryLog: String(error), errors: [String(error)] })
+      let sourceLog = ''
+      try { sourceLog = (await extractXlsxFile(asFile(excel))).formattedLog } catch { /* the workbook itself could not be read */ }
+      results.push({
+        file: excel.name,
+        comparedTo: json.name,
+        isValid: false,
+        summaryLog: String(error),
+        sourceLog,
+        errors: [String(error)]
+      })
     }
   }
   return results
@@ -64,10 +80,18 @@ function buildName(base: string, source: BatchSource, count: number): string {
   return `${safeBase}${dateSuffix}${count > 1 ? `-${safeSource}` : ''}.xlsx`
 }
 
-export async function generateSources(window: BrowserWindow, sources: BatchSource[]): Promise<BatchGenerationResult[]> {
+export async function generateSources(
+  window: BrowserWindow,
+  sources: BatchSource[],
+  selectedIds: string[]
+): Promise<BatchGenerationResult[]> {
   validateBatch(sources)
-  const excelFiles = sources.filter((source) => /\.xlsx$/i.test(source.name))
-  if (!excelFiles.length) throw new Error('Import at least one Excel workbook.')
+  if (!selectedIds.length) throw new Error('Select at least one Excel workbook.')
+  const selected = new Set(selectedIds)
+  const excelFiles = sources.filter((source) =>
+    /\.xlsx$/i.test(source.name) && Boolean(source.id && selected.has(source.id))
+  )
+  if (!excelFiles.length) throw new Error('No selected Excel workbooks were found in the imported batch.')
   const preferences = getPreferences()
   const results: BatchGenerationResult[] = []
   for (const source of excelFiles) {

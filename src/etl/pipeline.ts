@@ -14,10 +14,15 @@ import {
 
 export interface ValidationPipelineResult extends TransformResult {
   summaryLog: string
+  sourceLog: string
 }
 
-const toNum = (val: number | string | null | undefined): number =>
-  typeof val === 'number' ? val : 0
+const toNum = (val: number | string | null | undefined): number => {
+  if (typeof val === 'number') return Number.isFinite(val) ? val : 0
+  if (typeof val !== 'string') return 0
+  const parsed = Number(val.replace(/[$,\s]/g, ''))
+  return Number.isFinite(parsed) ? parsed : 0
+}
 
 export function compareReports(
   excelReport: AssessmentReport,
@@ -71,6 +76,20 @@ export function compareReports(
     }
   })
 
+  for (const [groupCode, excelGroup] of excelReport.groups) {
+    const jsonGroup = jsonReport.groups.get(groupCode)
+    if (!jsonGroup) {
+      discrepancies.push(`Missing Group ${groupCode} in JSON report.`)
+      continue
+    }
+    const jsonClassCodes = new Set(jsonGroup.items.map((item) => item.classCode))
+    for (const excelItem of excelGroup.items) {
+      if (!jsonClassCodes.has(excelItem.classCode)) {
+        discrepancies.push(`Group ${groupCode}: Class ${excelItem.classCode} missing in JSON.`)
+      }
+    }
+  }
+
   return discrepancies
 }
 
@@ -80,10 +99,28 @@ export async function runValidationPipeline(
 ): Promise<ValidationPipelineResult> {
   // 1. Extract raw rows (and SQL tab) from Excel and PSR payload from JSON
   const sheet = await extractXlsxFile(xlsxFile)
-  const rawJson = await extractJsonSchema<PsrJsonPayload>(jsonFile)
+  const result = transform(sheet.rows, sheet.sqlScript)
+  let rawJson: PsrJsonPayload
+  try {
+    rawJson = await extractJsonSchema<PsrJsonPayload>(jsonFile)
+    if (!rawJson || typeof rawJson !== 'object' || !rawJson.PSR || !Array.isArray(rawJson.PSR.ActiveRecap)) {
+      throw new Error('The JSON file must contain a PSR object with an ActiveRecap array.')
+    }
+    if (rawJson.PSR.ActiveRecap.some((item) => !item || typeof item !== 'object' || !String(item.Class ?? '').trim())) {
+      throw new Error('Every ActiveRecap entry must include a class code.')
+    }
+  } catch (error) {
+    const errors = [...result.errors, `JSON comparison file could not be read: ${error instanceof Error ? error.message : String(error)}`]
+    return {
+      ...result,
+      isValid: false,
+      errors,
+      sourceLog: sheet.formattedLog,
+      summaryLog: `Validation Failed (${errors.length} issue(s) found):\n${errors.map((item) => `- ${item}`).join('\n')}`
+    }
+  }
 
   // 2. Transform Excel rows and map JSON payload into AssessmentReport structures
-  const result = transform(sheet.rows, sheet.sqlScript)
   const jsonReport = mapPsrJsonToAssessmentReport(rawJson)
 
   // 3. Compare Excel values against JSON values
@@ -124,6 +161,7 @@ export async function runValidationPipeline(
     isValid,
     report: result.report,
     errors: allErrors,
+    sourceLog: sheet.formattedLog,
     summaryLog: logLines.join('\n')
   }
 }
