@@ -229,6 +229,8 @@ function createMainWindow() {
     ...visible ? { x: saved.x, y: saved.y } : {},
     minWidth: 600,
     minHeight: 500,
+    maxWidth: Math.round(screenWidth / 1.5),
+    maxHeight: screenHeight,
     show: false,
     frame: false,
     title: "TC33 Builder Pro",

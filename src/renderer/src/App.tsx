@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import type { BatchGenerationResult, BatchValidationResult, MismatchExportFormat, Preferences, RecentFile, SourceFile, WorkspaceState } from '../../shared/types'
 import './App.css'
 import './AppExtras.css'
+import CopyrightNotice from './components/CopyRightNotice'
 
 type Section = 'workspace' | 'history' | 'settings' | 'team'
 type ResultsTab = 'log' | 'issues'
@@ -285,6 +286,8 @@ function App(): React.JSX.Element {
     </div>
     {palette && <div className="modal-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPalette(false) }}><section className="command-dialog" role="dialog" aria-modal="true" aria-label="Quick actions"><input ref={paletteInput} role="combobox" aria-expanded="true" aria-controls="quick-action-list" aria-activedescendant={commands.length ? `quick-action-${activeCommandIndex}` : undefined} value={paletteQuery} onChange={(event) => { setPaletteQuery(event.target.value); setPaletteIndex(0) }} placeholder="Search actions…" aria-label="Search quick actions" onKeyDown={(event) => { if (event.key === 'Escape') setPalette(false); if (event.key === 'ArrowDown') { event.preventDefault(); setPaletteIndex((index) => Math.min(commands.length - 1, index + 1)) } if (event.key === 'ArrowUp') { event.preventDefault(); setPaletteIndex((index) => Math.max(0, index - 1)) } if (event.key === 'Enter' && commands[activeCommandIndex]) { commands[activeCommandIndex].action(); setPalette(false) } }} /><div className="command-list" id="quick-action-list" role="listbox">{commands.map((command, index) => <button id={`quick-action-${index}`} key={command.label} role="option" aria-selected={index === activeCommandIndex} onMouseEnter={() => setPaletteIndex(index)} onClick={() => { command.action(); setPalette(false) }}>{command.label}<span>↵</span></button>)}{!commands.length && <p>No matching actions.</p>}</div><footer><span>↑↓ Navigate</span><span>Enter Select</span><span>Esc Close</span></footer></section></div>}
     {showHistoryConfirm && <div className="modal-scrim"><section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="clear-title"><h2 id="clear-title">Clear saved history?</h2><p>This removes recent file paths and activity from this device. Source workbooks are not deleted.</p><div><button className="button outline" onClick={() => setShowHistoryConfirm(false)}>Cancel</button><button className="button danger" onClick={async () => { const next = api ? await api.clearHistory() : { ...state, recent: [], activity: [] }; setWorkspace(next); setShowHistoryConfirm(false) }}>Clear history</button></div></section></div>}
+        {/* <footer className="statusbar"><div className="footer-status"><span><span style={{color:'var(--accent)'}}>●</span> {busy ? 'Processing' : 'Ready'} · Your files stay on this device</span><span>Ctrl/⌘ O import · S export · F search</span></div><CopyrightNotice/></footer> */}
+
   </div>
 }
 export default App

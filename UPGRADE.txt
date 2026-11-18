@@ -1,36 +1,10 @@
-update repo : https://github.com/jadogeri/tc33-builder-pro
-
-copy ui from the folders listed below
-tc33_records_src 
-1 the logs shown should be shown in upgrade example of output Loaded: tc33 dist 1 data.xlsx | Sheet: Export Worksheet (33 rows) etc or when validation error occurs
-2 button to select json schema
-
-vital_records_src 
-1 add validation issues tab
-2 let user be able drop your files here for the batch
-3 theme icon at the top
-4 export invalid report as pdf, excel, csv ,json , text or word.docx
-6 main directory layout
-
-Fix
-Validate your batch is not working use tc33_records_src as reference
-
-New Features
-1 Drop multiple or single source files
-2 Drop multiple or single json files 
-3 read jsonfile and extract fipscode , district and tax year
-example  "PSR": {
-    "ParishInformation": [
-      {
-        "ParishName": "ORLEANS - 1ST MUNICIPAL DIST.",
-        "ParishFipsCode": "22171",
-        "TaxYear": 2027
-      }
-    ]
-4 and store json file user can see tax year , fipscode and district "last character of fipscode" 
-5 Allow to rename the json file using preferences its optional or use the filename. 
-6 user can see tax year fips code and district before opening file
-7 generate selecter all tc33 or select multiple tc33
-8 use tailwind css and framer motion 
-9 update ui interface. similar to vital_records_src but better and slicker.
-10 delete single source file "add trashcan icon" use vital_records_src  as reference
+Using cod in Workspace.txt as reference
+1 Add Footer using copyright
+2 Add theme icon at top similar to         <div className="top-actions"><span className="local-badge">Local & private</span>
+          <button title={`Theme: ${theme}. Switch theme`} aria-label={`Theme: ${theme}`} onClick={() => setTheme(theme === 'light' ? 'dark' : theme === 'dark' ? 'contrast' : 'light')}><Icon name="sun"/></button>
+          <button className="primary" disabled={!!busy} onClick={openFiles}><Icon name="plus"/>Import files</button>
+        </div>
+3 update sidebar and top bar and footer to sticky 
+4 make run log are height bigger add scroll if logs get too long
+5 add version v1 on sidebar
+6 Add remove button functionality next to reopen button 

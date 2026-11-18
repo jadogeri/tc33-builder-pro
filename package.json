@@ -9,11 +9,13 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "build:portable": "npm run build && electron-builder --win dir",
+    "build:installer": "npm run build && electron-builder --win nsis",
+    "build:win": "npm run build && electron-builder --win nsis dir",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "test:ui": "playwright test",
-    "dev:web": "vite --config vite.web.config.ts",
-    "build:win": "npm run build && electron-builder --win"
+    "dev:web": "vite --config vite.web.config.ts"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
@@ -52,10 +54,12 @@
     "vite": "^6.0.0"
   },
   "build": {
+    "electronDist": "node_modules/electron/dist",
     "appId": "com.josephadogeri.electronapp",
     "productName": "TC33 Builder Pro",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "resources"
     },
     "files": [
       "out/**/*",
@@ -63,9 +67,11 @@
       "package.json"
     ],
     "win": {
+      "icon": "resources/icon.ico",
+      "signAndEditExecutable": false,
       "target": [
-        "nsis",
-        "dir"
+        "dir",
+        "nsis"
       ]
     }
   }
