@@ -43,7 +43,11 @@ const preferencesSchema = zod.z.object({
   filename: zod.z.string().trim().min(1).max(100).refine((name) => !/[\\/:*?"<>|\0]/.test(name) && !name.endsWith("."), "Use a valid filename without an extension").default("tc33"),
   dateFormat: zod.z.enum(["none", "YYYY-MM-DD", "MM-DD-YYYY", "YYYYMMDD"]).default("none"),
   defaultDistrict: zod.z.string().regex(/^\d?$/, "District must be one digit").default(""),
-  defaultTaxYear: zod.z.string().regex(/^(|\d{4})$/, "Tax year must be four digits").default("")
+  defaultTaxYear: zod.z.string().regex(/^(|\d{4})$/, "Tax year must be four digits").default(""),
+  jsonFilename: zod.z.string().trim().max(100).refine(
+    (name) => !/[\\/:*?"<>|\0]/.test(name) && !name.endsWith("."),
+    "Use a valid filename without an extension"
+  ).default("")
 });
 const activitySchema = zod.z.object({
   action: zod.z.string().max(80),
@@ -140,6 +144,7 @@ const channels = {
   getWorkspace: "workspace:get",
   setPreferences: "workspace:preferences",
   openSources: "workspace:open",
+  importDroppedSources: "workspace:import-dropped",
   reopenSource: "workspace:reopen",
   recordActivity: "workspace:activity",
   clearHistory: "workspace:clear",
@@ -777,6 +782,25 @@ function transform(extractedRows, sqlScript) {
     errors
   };
 }
+function extractPsrMetadata(payload) {
+  if (!payload || typeof payload !== "object") return {};
+  const psr = payload.PSR;
+  if (!psr || typeof psr !== "object") return {};
+  const parishInformation = psr.ParishInformation;
+  if (!Array.isArray(parishInformation) || !parishInformation.length) return {};
+  const parish = parishInformation[0];
+  const rawFips = parish.ParishFipsCode;
+  const fipsCode = typeof rawFips === "string" || typeof rawFips === "number" ? String(rawFips).trim() : "";
+  const rawTaxYear = parish.TaxYear;
+  const taxYear = typeof rawTaxYear === "string" || typeof rawTaxYear === "number" ? String(rawTaxYear).trim() : "";
+  const rawParishName = parish.ParishName;
+  const parishName = typeof rawParishName === "string" ? rawParishName.trim() : "";
+  return {
+    ...parishName ? { parishName } : {},
+    ...fipsCode ? { fipsCode, district: fipsCode.slice(-1) } : {},
+    ...taxYear ? { taxYear } : {}
+  };
+}
 function mapClassToGroupCode(classCode) {
   const num = Number(classCode);
   if (num >= 30 && num <= 49) return "1";
@@ -787,10 +811,9 @@ function mapClassToGroupCode(classCode) {
 }
 function mapPsrJsonToAssessmentReport(payload) {
   const groups = /* @__PURE__ */ new Map();
-  const parish = payload.PSR?.ParishInformation?.[0];
-  const district = parish?.ParishFipsCode ? parish.ParishFipsCode.slice(-1) : void 0;
-  const taxYear = parish?.TaxYear ? String(parish.TaxYear) : void 0;
-  for (const item of payload.PSR?.ActiveRecap ?? []) {
+  const safePayload = payload && typeof payload === "object" ? payload : { PSR: {} };
+  const metadata = extractPsrMetadata(safePayload);
+  for (const item of safePayload.PSR?.ActiveRecap ?? []) {
     const groupCode = mapClassToGroupCode(item.Class);
     if (!groupCode) continue;
     if (!groups.has(groupCode)) {
@@ -823,11 +846,16 @@ function mapPsrJsonToAssessmentReport(payload) {
   return {
     groups,
     summaryRows: {},
-    district,
-    taxYear
+    district: metadata.district,
+    taxYear: metadata.taxYear
   };
 }
-const toNum = (val) => typeof val === "number" ? val : 0;
+const toNum = (val) => {
+  if (typeof val === "number") return Number.isFinite(val) ? val : 0;
+  if (typeof val !== "string") return 0;
+  const parsed = Number(val.replace(/[$,\s]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 function compareReports(excelReport, jsonReport) {
   const discrepancies = [];
   if (jsonReport.district && excelReport.district !== jsonReport.district) {
@@ -870,12 +898,44 @@ function compareReports(excelReport, jsonReport) {
       }
     }
   });
+  for (const [groupCode, excelGroup] of excelReport.groups) {
+    const jsonGroup = jsonReport.groups.get(groupCode);
+    if (!jsonGroup) {
+      discrepancies.push(`Missing Group ${groupCode} in JSON report.`);
+      continue;
+    }
+    const jsonClassCodes = new Set(jsonGroup.items.map((item) => item.classCode));
+    for (const excelItem of excelGroup.items) {
+      if (!jsonClassCodes.has(excelItem.classCode)) {
+        discrepancies.push(`Group ${groupCode}: Class ${excelItem.classCode} missing in JSON.`);
+      }
+    }
+  }
   return discrepancies;
 }
 async function runValidationPipeline(xlsxFile, jsonFile) {
   const sheet = await extractXlsxFile(xlsxFile);
-  const rawJson = await extractJsonSchema(jsonFile);
   const result = transform(sheet.rows, sheet.sqlScript);
+  let rawJson;
+  try {
+    rawJson = await extractJsonSchema(jsonFile);
+    if (!rawJson || typeof rawJson !== "object" || !rawJson.PSR || !Array.isArray(rawJson.PSR.ActiveRecap)) {
+      throw new Error("The JSON file must contain a PSR object with an ActiveRecap array.");
+    }
+    if (rawJson.PSR.ActiveRecap.some((item) => !item || typeof item !== "object" || !String(item.Class ?? "").trim())) {
+      throw new Error("Every ActiveRecap entry must include a class code.");
+    }
+  } catch (error) {
+    const errors = [...result.errors, `JSON comparison file could not be read: ${error instanceof Error ? error.message : String(error)}`];
+    return {
+      ...result,
+      isValid: false,
+      errors,
+      sourceLog: sheet.formattedLog,
+      summaryLog: `Validation Failed (${errors.length} issue(s) found):
+${errors.map((item) => `- ${item}`).join("\n")}`
+    };
+  }
   const jsonReport = mapPsrJsonToAssessmentReport(rawJson);
   const jsonDiscrepancies = compareReports(result.report, jsonReport);
   const allErrors = [...result.errors, ...jsonDiscrepancies];
@@ -910,6 +970,7 @@ Total Active Assessed: $${result.report.summaryRows.totalActive.totalAssessed?.t
     isValid,
     report: result.report,
     errors: allErrors,
+    sourceLog: sheet.formattedLog,
     summaryLog: logLines.join("\n")
   };
 }
@@ -947,9 +1008,28 @@ async function validateSources(sources) {
     const json = matchingJson(excel, jsonFiles);
     try {
       const result = await runValidationPipeline(asFile(excel), asFile(json));
-      results.push({ file: excel.name, comparedTo: json.name, isValid: result.isValid, summaryLog: result.summaryLog, errors: result.errors });
+      results.push({
+        file: excel.name,
+        comparedTo: json.name,
+        isValid: result.isValid,
+        summaryLog: result.summaryLog,
+        sourceLog: result.sourceLog,
+        errors: result.errors
+      });
     } catch (error) {
-      results.push({ file: excel.name, comparedTo: json.name, isValid: false, summaryLog: String(error), errors: [String(error)] });
+      let sourceLog = "";
+      try {
+        sourceLog = (await extractXlsxFile(asFile(excel))).formattedLog;
+      } catch {
+      }
+      results.push({
+        file: excel.name,
+        comparedTo: json.name,
+        isValid: false,
+        summaryLog: String(error),
+        sourceLog,
+        errors: [String(error)]
+      });
     }
   }
   return results;
@@ -966,10 +1046,14 @@ function buildName(base, source, count) {
   const safeSource = source.name.replace(/\.xlsx$/i, "").replace(/[\\/:*?"<>|\0]/g, "-").slice(0, 100);
   return `${safeBase}${dateSuffix}${count > 1 ? `-${safeSource}` : ""}.xlsx`;
 }
-async function generateSources(window, sources) {
+async function generateSources(window, sources, selectedIds) {
   validateBatch(sources);
-  const excelFiles = sources.filter((source) => /\.xlsx$/i.test(source.name));
-  if (!excelFiles.length) throw new Error("Import at least one Excel workbook.");
+  if (!selectedIds.length) throw new Error("Select at least one Excel workbook.");
+  const selected = new Set(selectedIds);
+  const excelFiles = sources.filter(
+    (source) => /\.xlsx$/i.test(source.name) && Boolean(source.id && selected.has(source.id))
+  );
+  if (!excelFiles.length) throw new Error("No selected Excel workbooks were found in the imported batch.");
   const preferences = getPreferences();
   const results = [];
   for (const source of excelFiles) {
@@ -1004,14 +1088,69 @@ async function generateSources(window, sources) {
   }
   return results;
 }
+async function buildMismatchExport(format, issues) {
+  if (format === "json") {
+    return Buffer.from(JSON.stringify({
+      title: "TC33 Validation Mismatches",
+      generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      issues
+    }, null, 2));
+  }
+  if (format === "txt") {
+    return Buffer.from(["TC33 Validation Mismatches", "", ...issues.map((line) => `- ${line}`)].join("\n"));
+  }
+  if (format === "csv") {
+    const escape = (value) => `"${value.replace(/"/g, '""')}"`;
+    return Buffer.from([["Issue"], ...issues.map((line) => [line])].map((row) => row.map(escape).join(",")).join("\r\n"));
+  }
+  if (format === "xlsx") {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Validation Issues");
+    sheet.addRow(["Validation issue"]);
+    for (const issue of issues) sheet.addRow([issue]);
+    sheet.getRow(1).font = { bold: true };
+    sheet.columns = [{ width: 110 }];
+    sheet.autoFilter = { from: "A1", to: `A${Math.max(1, issues.length + 1)}` };
+    return Buffer.from(await workbook.xlsx.writeBuffer());
+  }
+  if (format === "docx") {
+    const { Document, Packer, Paragraph, TextRun } = await import("docx");
+    const document = new Document({ sections: [{ children: [
+      new Paragraph({ children: [new TextRun({ text: "TC33 Validation Mismatches", bold: true, size: 30 })] }),
+      ...issues.map((line) => new Paragraph({ text: line }))
+    ] }] });
+    return Buffer.from(await Packer.toBuffer(document));
+  }
+  const { jsPDF } = await import("jspdf");
+  const pdf = new jsPDF();
+  pdf.setFontSize(16);
+  pdf.text("TC33 Validation Mismatches", 14, 18);
+  pdf.setFontSize(10);
+  const text = pdf.splitTextToSize(issues.join("\n"), 180);
+  const linesPerPage = Math.max(1, Math.floor((pdf.internal.pageSize.getHeight() - 36) / 5));
+  for (let index = 0; index < text.length; index += linesPerPage) {
+    if (index > 0) pdf.addPage();
+    pdf.text(text.slice(index, index + linesPerPage), 14, 28);
+  }
+  return Buffer.from(pdf.output("arraybuffer"));
+}
 function registerIPC() {
-  async function readSource(filePath) {
+  async function readSource(filePath, displayName) {
     if (!/\.(xlsx|json)$/i.test(filePath)) throw new Error("Select .xlsx or .json files");
     const info = await promises.stat(filePath);
     if (!info.isFile() || info.size > 25 * 1024 * 1024) throw new Error("Each source must be smaller than 25 MB");
     const bytes = await promises.readFile(filePath);
-    rememberFile({ name: node_path.basename(filePath), path: filePath, openedAt: (/* @__PURE__ */ new Date()).toISOString() });
-    return { name: node_path.basename(filePath), path: filePath, bytes: new Uint8Array(bytes) };
+    const name = displayName ?? node_path.basename(filePath);
+    let metadata;
+    if (/\.json$/i.test(name)) {
+      try {
+        metadata = extractPsrMetadata(JSON.parse(bytes.toString("utf8")));
+      } catch {
+        metadata = void 0;
+      }
+    }
+    rememberFile({ name, path: filePath, openedAt: (/* @__PURE__ */ new Date()).toISOString() });
+    return { name, path: filePath, bytes: new Uint8Array(bytes), ...metadata ? { metadata } : {} };
   }
   handle("getWorkspace", () => getWorkspace());
   handle("setPreferences", (event, input) => {
@@ -1031,16 +1170,18 @@ function registerIPC() {
   handle("rendererReady", () => {
   });
   handle("validateSources", (_event, sources) => validateSources(sources));
-  handle("generateSources", (event, sources) => {
+  handle("generateSources", (event, sources, selectedIds) => {
     const window = electron.BrowserWindow.fromWebContents(event.sender);
     if (!window) throw new Error("The app window is unavailable.");
-    return generateSources(window, sources);
+    zod.z.array(zod.z.string().max(4096)).min(1).max(50).parse(selectedIds);
+    return generateSources(window, sources, selectedIds);
   });
-  handle("openSources", async (event) => {
+  handle("openSources", async (event, kind = "all") => {
+    zod.z.enum(["all", "json"]).parse(kind);
     const window = electron.BrowserWindow.fromWebContents(event.sender);
     const result = await electron.dialog.showOpenDialog(window, {
       properties: ["openFile", "multiSelections"],
-      filters: [{ name: "TC33 sources", extensions: ["xlsx", "json"] }]
+      filters: [{ name: kind === "json" ? "PSR JSON schema" : "TC33 sources", extensions: kind === "json" ? ["json"] : ["xlsx", "json"] }]
     });
     if (result.canceled) return [];
     if (result.filePaths.length > 50) throw new Error("Import at most 50 files at once");
@@ -1050,6 +1191,28 @@ function registerIPC() {
     }
     const files = [];
     for (const path of result.filePaths) files.push(await readSource(path));
+    return files;
+  });
+  handle("importDroppedSources", async (_event, input) => {
+    if (!Array.isArray(input) || input.length > 50) throw new Error("Drop at most 50 source files at once.");
+    let totalBytes = 0;
+    for (const source of input) {
+      if (!source || typeof source.name !== "string" || source.name.length > 255 || !/\.(xlsx|json)$/i.test(source.name) || !(source.bytes instanceof Uint8Array)) {
+        throw new Error("Drop valid .xlsx and .json source files.");
+      }
+      if (source.bytes.byteLength > 25 * 1024 * 1024) throw new Error("Each source file must be smaller than 25 MB.");
+      totalBytes += source.bytes.byteLength;
+    }
+    if (totalBytes > 100 * 1024 * 1024) throw new Error("Select files with a combined size under 100 MB.");
+    const importDirectory = node_path.join(electron.app.getPath("userData"), "dropped-sources");
+    await promises.mkdir(importDirectory, { recursive: true });
+    const files = [];
+    for (const source of input) {
+      const extension = node_path.extname(source.name).toLowerCase();
+      const filePath = node_path.join(importDirectory, `${node_crypto.randomUUID()}${extension}`);
+      await promises.writeFile(filePath, Buffer.from(source.bytes));
+      files.push(await readSource(filePath, node_path.basename(source.name)));
+    }
     return files;
   });
   handle("reopenSource", (_event, filePath) => {
@@ -1072,32 +1235,12 @@ function registerIPC() {
     return true;
   });
   handle("exportMismatches", async (event, format, name, issues) => {
-    zod.z.enum(["pdf", "docx"]).parse(format);
-    zod.z.string().min(1).max(180).regex(/^[^\\/:*?"<>|\0]+\.(pdf|docx)$/i).parse(name);
+    const supportedFormats = ["pdf", "docx", "xlsx", "csv", "json", "txt"];
+    zod.z.enum(supportedFormats).parse(format);
+    zod.z.string().min(1).max(180).regex(/^[^\\/:*?"<>|\0]+\.(pdf|docx|xlsx|csv|json|txt)$/i).parse(name);
     zod.z.array(zod.z.string().max(2e3)).max(1e3).parse(issues);
     const window = electron.BrowserWindow.fromWebContents(event.sender);
-    let bytes;
-    if (format === "docx") {
-      const { Document, Packer, Paragraph, TextRun } = await import("docx");
-      const doc = new Document({ sections: [{ children: [
-        new Paragraph({ children: [new TextRun({ text: "TC33 Validation Mismatches", bold: true, size: 30 })] }),
-        ...issues.map((line) => new Paragraph({ text: line }))
-      ] }] });
-      bytes = await Packer.toBuffer(doc);
-    } else {
-      const { jsPDF } = await import("jspdf");
-      const pdf = new jsPDF();
-      pdf.setFontSize(16);
-      pdf.text("TC33 Validation Mismatches", 14, 18);
-      pdf.setFontSize(10);
-      const text = pdf.splitTextToSize(issues.join("\n"), 180);
-      const linesPerPage = Math.max(1, Math.floor((pdf.internal.pageSize.getHeight() - 36) / 5));
-      for (let index = 0; index < text.length; index += linesPerPage) {
-        if (index > 0) pdf.addPage();
-        pdf.text(text.slice(index, index + linesPerPage), 14, 28);
-      }
-      bytes = Buffer.from(pdf.output("arraybuffer"));
-    }
+    const bytes = await buildMismatchExport(format, issues);
     const result = await electron.dialog.showSaveDialog(window, { defaultPath: name });
     if (result.canceled || !result.filePath) return false;
     await promises.writeFile(result.filePath, bytes);
@@ -1356,7 +1499,7 @@ ${err.stack || err}`);
 });
 process.on("unhandledRejection", (reason) => {
   fs.writeFileSync("crash.txt", `UNHANDLED REJECTION:
-${reason?.stack || reason}`);
+${reason instanceof Error ? reason.stack || reason.message : String(reason)}`);
   process.exit(1);
 });
 function initWindow() {

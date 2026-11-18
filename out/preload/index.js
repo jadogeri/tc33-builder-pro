@@ -17,6 +17,7 @@ const channels = {
   getWorkspace: "workspace:get",
   setPreferences: "workspace:preferences",
   openSources: "workspace:open",
+  importDroppedSources: "workspace:import-dropped",
   reopenSource: "workspace:reopen",
   recordActivity: "workspace:activity",
   clearHistory: "workspace:clear",
@@ -50,14 +51,15 @@ const api = {
   windowControl: (action) => invoke("windowControl", action),
   getWorkspace: () => invoke("getWorkspace"),
   setPreferences: (preferences) => invoke("setPreferences", preferences),
-  openSources: () => invoke("openSources"),
+  openSources: (kind) => invoke("openSources", kind),
+  importDroppedSources: (sources) => invoke("importDroppedSources", sources),
   reopenSource: (path) => invoke("reopenSource", path),
   recordActivity: (entry) => invoke("recordActivity", entry),
   clearHistory: () => invoke("clearHistory"),
   saveExport: (name, bytes) => invoke("saveExport", name, bytes),
   exportMismatches: (format, name, issues) => invoke("exportMismatches", format, name, issues),
   validateSources: (sources) => invoke("validateSources", sources),
-  generateSources: (sources) => invoke("generateSources", sources),
+  generateSources: (sources, selectedIds) => invoke("generateSources", sources, selectedIds),
   rendererReady: () => invoke("rendererReady")
 };
 electron.contextBridge.exposeInMainWorld("api", api);
