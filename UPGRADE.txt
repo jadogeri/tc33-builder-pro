@@ -1,35 +1,36 @@
 update repo : https://github.com/jadogeri/tc33-builder-pro
 
-Theme
-CREATE UI SIMILAR TO other repo https://github.com/josephadogeriopao/vital-records-generator.GIT BUT USE COLOR Theme OF
-ICON in resources/icon.png  CREATE 3 THEMES LIGHT DARK AND BLACK THEME based on icon
+copy ui from the folders listed below
+tc33_records_src 
+1 the logs shown should be shown in upgrade example of output Loaded: tc33 dist 1 data.xlsx | Sheet: Export Worksheet (33 rows) etc or when validation error occurs
+2 button to select json schema
 
-Functionality
-USE other REPO https://github.com/jadogeri/Electron-Vite-App-Template/blob/main/documentation/FEATURE_ROADMAP.md
-TO MODIFY APP ADD
-MAIN AND ONLY THESE FEATURES
-• feat/frameless-window (Features 15–16): Replaces the default OS window frame with a custom HTML/CSS title bar and adds a bounded splash screen on startup. You need to verify native window controls (minimize, maximize, close) and screen-reader accessibility across Windows, macOS, and Linux.
-• feat/system-tray (Features 17–18): Adds a system tray icon that saves user preferences (such as minimizing to tray instead of quitting) and provides a fallback mechanism when native OS desktop notifications are blocked. You need to test how the tray icon and notification permissions behave on each desktop OS.
-• feat/command-palette (Features 19–21): Implements bounded keyboard shortcuts, a searchable quick-action command palette (like Ctrl+K / Cmd+K), and native application menus. You must check that shortcuts do not collide with system-level OS hotkeys and that screen readers can navigate the palette.
-ONLY
+vital_records_src 
+1 add validation issues tab
+2 let user be able drop your files here for the batch
+3 theme icon at the top
+4 export invalid report as pdf, excel, csv ,json , text or word.docx
+6 main directory layout
 
-Features
-Add features
-Recent Files and activity
-Team - same as vital records
-input layout profiles (replace with preferences if user has a default file name to be reused as option) like save tc33 file
-or create using date format of different kinds
-save history similar to vital-records-generator.GIT 
-batch validate . batch load multiple source excel data 
-can clear saved history . 
-export mismatch data as pdf or word docx
+Fix
+Validate your batch is not working use tc33_records_src as reference
 
-add functionality
-
-
-Tests
-ui tests using playwright
-tests
-
-Layouts 
-use same layouts as vital records repository
+New Features
+1 Drop multiple or single source files
+2 Drop multiple or single json files 
+3 read jsonfile and extract fipscode , district and tax year
+example  "PSR": {
+    "ParishInformation": [
+      {
+        "ParishName": "ORLEANS - 1ST MUNICIPAL DIST.",
+        "ParishFipsCode": "22171",
+        "TaxYear": 2027
+      }
+    ]
+4 and store json file user can see tax year , fipscode and district "last character of fipscode" 
+5 Allow to rename the json file using preferences its optional or use the filename. 
+6 user can see tax year fips code and district before opening file
+7 generate selecter all tc33 or select multiple tc33
+8 use tailwind css and framer motion 
+9 update ui interface. similar to vital_records_src but better and slicker.
+10 delete single source file "add trashcan icon" use vital_records_src  as reference

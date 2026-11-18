@@ -7,6 +7,18 @@ import { registerUpdater } from './updater'
 import { getPreferences } from './settings'
 import { registerTray } from './desktop'
 import { registerLogger } from './logger'
+import fs from 'fs'
+
+process.on('uncaughtException', (err) => {
+  fs.writeFileSync('crash.txt', `UNCAUGHT EXCEPTION:\n${err.stack || err}`)
+  process.exit(1)
+})
+
+process.on('unhandledRejection', (reason) => {
+  fs.writeFileSync('crash.txt', `UNHANDLED REJECTION:\n${reason?.stack || reason}`)
+  process.exit(1)
+})
+
 
 
 function initWindow(): void {
