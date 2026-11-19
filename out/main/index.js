@@ -260,21 +260,32 @@ function createMainWindow() {
     backgroundColor: "#182c40",
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false }
   });
+  const splashStartedAt = Date.now();
+  let revealRequested = false;
+  let revealDelay;
   void splash.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(
     '<!doctype html><html lang="en"><title>Starting TC33</title><body style="background:#182c40;color:#fff;font:20px system-ui;text-align:center;padding:60px 10px"><h1 style="color:#ffb45e">TC33 Builder Pro</h1><p role="status">Opening your workspace…</p></body></html>'
   ));
   splash.once("ready-to-show", () => {
     if (!splash.isDestroyed()) splash.show();
   });
-  const reveal = () => {
+  const showMainWindow = () => {
     clearTimeout(timeout);
     if (!splash.isDestroyed()) splash.destroy();
     if (!mainWindow.isDestroyed()) mainWindow.show();
+  };
+  const reveal = () => {
+    if (revealRequested) return;
+    revealRequested = true;
+    const remaining = Math.max(0, 2500 - (Date.now() - splashStartedAt));
+    if (remaining) revealDelay = setTimeout(showMainWindow, remaining);
+    else showMainWindow();
   };
   const timeout = setTimeout(reveal, 8e3);
   mainWindow.once("ready-to-show", reveal);
   mainWindow.once("closed", () => {
     clearTimeout(timeout);
+    if (revealDelay) clearTimeout(revealDelay);
     if (!splash.isDestroyed()) splash.destroy();
   });
   mainWindow.webContents.once("did-fail-load", reveal);
@@ -1175,6 +1186,27 @@ async function buildMismatchExport(format, issues) {
   }
   return Buffer.from(pdf.output("arraybuffer"));
 }
+const windowsReservedName = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
+async function saveDroppedSource(directory, source) {
+  const extension = node_path.extname(source.name);
+  if (!extension || !/\.(xlsx|json)$/i.test(extension) || /[\\/:*?"<>|\0-\x1f]/.test(source.name) || windowsReservedName.test(source.name)) {
+    throw new Error("Dropped source filename is not safe to save.");
+  }
+  const stem = source.name.slice(0, -extension.length);
+  for (let duplicate = 1; duplicate <= 1e4; duplicate += 1) {
+    const suffix = duplicate === 1 ? "" : ` (${duplicate})`;
+    const availableStemLength = Math.max(1, 255 - extension.length - suffix.length);
+    const candidateName = `${stem.slice(0, availableStemLength)}${suffix}${extension}`;
+    const filePath = node_path.join(directory, candidateName);
+    try {
+      await promises.writeFile(filePath, Buffer.from(source.bytes), { flag: "wx" });
+      return filePath;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+  }
+  throw new Error(`Could not create a unique filename for ${source.name}.`);
+}
 function registerIPC() {
   async function readSource(filePath, displayName) {
     if (!/\.(xlsx|json)$/i.test(filePath)) throw new Error("Select .xlsx or .json files");
@@ -1249,9 +1281,7 @@ function registerIPC() {
     await promises.mkdir(importDirectory, { recursive: true });
     const files = [];
     for (const source of input) {
-      const extension = node_path.extname(source.name).toLowerCase();
-      const filePath = node_path.join(importDirectory, `${node_crypto.randomUUID()}${extension}`);
-      await promises.writeFile(filePath, Buffer.from(source.bytes));
+      const filePath = await saveDroppedSource(importDirectory, source);
       files.push(await readSource(filePath, node_path.basename(source.name)));
     }
     return files;
