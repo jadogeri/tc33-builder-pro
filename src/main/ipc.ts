@@ -1,7 +1,6 @@
 import { app, BrowserWindow, dialog, nativeTheme } from 'electron'
-import { basename, extname, join } from 'node:path'
+import { basename, join } from 'node:path'
 import { mkdir, readFile, writeFile, stat } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
 import { channels } from '../shared/channels'
 import { getSettings, setTheme, getWorkspace, setPreferences, rememberFile, removeRecentFile, recordActivity, clearHistory } from './settings'
 import { notify, registerTray, unregisterTray } from './desktop'
@@ -13,6 +12,7 @@ import { generateSources, validateSources } from './tasks'
 import { extractPsrMetadata } from '../etl/transform'
 import type { DroppedSource, MismatchExportFormat } from '../shared/types'
 import { buildMismatchExport } from './mismatch-export'
+import { saveDroppedSource } from './dropped-sources'
 
 export function registerIPC(): void {
   async function readSource(filePath: string, displayName?: string) {
@@ -85,9 +85,7 @@ export function registerIPC(): void {
     await mkdir(importDirectory, { recursive: true })
     const files = []
     for (const source of input) {
-      const extension = extname(source.name).toLowerCase()
-      const filePath = join(importDirectory, `${randomUUID()}${extension}`)
-      await writeFile(filePath, Buffer.from(source.bytes))
+      const filePath = await saveDroppedSource(importDirectory, source)
       files.push(await readSource(filePath, basename(source.name)))
     }
     return files

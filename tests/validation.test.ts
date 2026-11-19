@@ -7,6 +7,10 @@ import { buildTc33Workbook } from '../src/etl/load'
 import { extractPsrMetadata, transform } from '../src/etl/transform'
 import { runValidationPipeline } from '../src/etl/pipeline'
 import { buildMismatchExport } from '../src/main/mismatch-export'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { saveDroppedSource } from '../src/main/dropped-sources'
 
 test('preferences preserve valid appearance and export defaults', () => {
   assert.deepEqual(preferencesSchema.parse({ theme: 'black', defaultDistrict: '3', defaultTaxYear: '2027' }), {
@@ -159,4 +163,27 @@ test('invalid reports export in all six requested formats', async () => {
   assert.equal((await buildMismatchExport('xlsx', issues)).subarray(0, 2).toString('hex'), '504b')
   assert.equal((await buildMismatchExport('docx', issues)).subarray(0, 2).toString('hex'), '504b')
   assert.match((await buildMismatchExport('pdf', issues)).toString('utf8', 0, 8), /^%PDF-/)
+})
+
+test('dropped JSON and Excel files keep their names and avoid overwriting collisions', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'tc33-dropped-sources-'))
+  try {
+    const json = { name: 'parish-report.json', bytes: new Uint8Array([1, 2, 3]) }
+    const excel = { name: 'parish-report.xlsx', bytes: new Uint8Array([4, 5, 6]) }
+    const jsonPath = await saveDroppedSource(directory, json)
+    const excelPath = await saveDroppedSource(directory, excel)
+    const duplicatePath = await saveDroppedSource(directory, { ...json, bytes: new Uint8Array([7]) })
+
+    assert.equal(jsonPath, join(directory, 'parish-report.json'))
+    assert.equal(excelPath, join(directory, 'parish-report.xlsx'))
+    assert.equal(duplicatePath, join(directory, 'parish-report (2).json'))
+    assert.deepEqual(await readFile(jsonPath), Buffer.from([1, 2, 3]))
+    assert.deepEqual(await readFile(duplicatePath), Buffer.from([7]))
+    await assert.rejects(
+      () => saveDroppedSource(directory, { name: '../outside.xlsx', bytes: new Uint8Array([8]) }),
+      /filename is not safe/
+    )
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })

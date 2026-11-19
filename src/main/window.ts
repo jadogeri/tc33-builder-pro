@@ -49,18 +49,32 @@ export function createMainWindow(): BrowserWindow {
     backgroundColor: '#182c40',
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false }
   })
+  const splashStartedAt = Date.now()
+  let revealRequested = false
+  let revealDelay: ReturnType<typeof setTimeout> | undefined
   void splash.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(
     '<!doctype html><html lang="en"><title>Starting TC33</title><body style="background:#182c40;color:#fff;font:20px system-ui;text-align:center;padding:60px 10px"><h1 style="color:#ffb45e">TC33 Builder Pro</h1><p role="status">Opening your workspace…</p></body></html>'
   ))
   splash.once('ready-to-show', () => { if (!splash.isDestroyed()) splash.show() })
-  const reveal = () => {
+  const showMainWindow = () => {
     clearTimeout(timeout)
     if (!splash.isDestroyed()) splash.destroy()
     if (!mainWindow.isDestroyed()) mainWindow.show()
   }
+  const reveal = () => {
+    if (revealRequested) return
+    revealRequested = true
+    const remaining = Math.max(0, 2500 - (Date.now() - splashStartedAt))
+    if (remaining) revealDelay = setTimeout(showMainWindow, remaining)
+    else showMainWindow()
+  }
   const timeout = setTimeout(reveal, 8000)
   mainWindow.once('ready-to-show', reveal)
-  mainWindow.once('closed', () => { clearTimeout(timeout); if (!splash.isDestroyed()) splash.destroy() })
+  mainWindow.once('closed', () => {
+    clearTimeout(timeout)
+    if (revealDelay) clearTimeout(revealDelay)
+    if (!splash.isDestroyed()) splash.destroy()
+  })
   mainWindow.webContents.once('did-fail-load', reveal)
   mainWindow.webContents.on('render-process-gone', () => {
     if (mainWindow.isDestroyed()) return
